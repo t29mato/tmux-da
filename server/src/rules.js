@@ -3,6 +3,8 @@
 
 export const COURSES = { easy: 15, normal: 20, hard: 16 };
 export const VER = 2;
+// Practice runs (稽古の間) are synced between devices but never ranked.
+export const PRACTICE = ['keiko'];
 // A person needs at least two keys per question; nobody does that in less.
 export const MIN_PER_Q = 0.25;
 
@@ -20,7 +22,7 @@ export function normalizeKey(key) {
 export function cleanRun(r) {
   if (!r || typeof r !== 'object') return null;
   if (typeof r.id !== 'string' || r.id.length > 40) return null;
-  if (!COURSES[r.course]) return null;
+  if (!COURSES[r.course] && !PRACTICE.includes(r.course)) return null;
   if (typeof r.time !== 'number' || !(r.time > 0) || r.time > 36000) return null;
   if (typeof r.at !== 'string' || r.at.length > 40 || isNaN(Date.parse(r.at))) return null;
   const body = JSON.stringify(r);

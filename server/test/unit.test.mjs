@@ -39,6 +39,7 @@ test('checkRun: misses add +2 秒 to their question', () => {
 test('checkRun refuses impossible or broken runs', () => {
   const bad = [
     ['unknown course', { ...run(20), course: 'nope' }],
+    ['practice is never ranked', { ...run(20), course: 'keiko' }],
     ['old rules', { ...run(20), ver: 1 }],
     ['a question missing', run(19)],
     ['inhumanly fast', run(20, MIN_PER_Q - 0.01)],
@@ -53,6 +54,7 @@ test('checkRun refuses impossible or broken runs', () => {
 test('cleanRun keeps sane runs and drops the rest', () => {
   assert.ok(cleanRun({ id: 'r_1', course: 'easy', time: 20, at: '2026-10-21T00:00:00Z' }));
   assert.equal(cleanRun({ id: 'r_1', course: 'nope', time: 20, at: '2026-10-21T00:00:00Z' }), null);
+  assert.ok(cleanRun({ id: 'r_k', course: 'keiko', time: 20, at: '2026-10-21T00:00:00Z' }), 'practice runs sync');
   assert.equal(cleanRun({ id: 'r_1', course: 'easy', time: -1, at: '2026-10-21T00:00:00Z' }), null);
   assert.equal(cleanRun({ id: 'r_1', course: 'easy', time: 20, at: 'yesterday' }), null);
   assert.equal(cleanRun({ id: 'r_1', course: 'easy', time: 20, at: '2026-10-21T00:00:00Z', pad: 'x'.repeat(9000) }), null);

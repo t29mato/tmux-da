@@ -114,3 +114,87 @@ test('storage that throws does not break the game', () => {
   assert.doesNotThrow(() => REC.add(run(40)));
   assert.equal(REC.runsOf('easy').length, 0);
 });
+
+// ---- learning across courses -------------------------------------------------
+
+// A run where every question is `t`, each taking `s` seconds (easy: 目安 12).
+const typed = (t, s, extra = {}) => ({ ...run(15 * s), qs: Array.from({ length: 15 }, () => ({ t, s, m: 0, ...extra })) });
+
+test('learnt: three clean solves in a row within the 目安 make a type learnt', () => {
+  const REC = fresh();
+  REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 0 }, { t: 'zoom', s: 2, m: 0 }] });
+  assert.equal(REC.learnt().zoom.learnt, false);
+  REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 0 }] });
+  assert.equal(REC.learnt().zoom.learnt, true);
+});
+
+test('learnt: a wrong key, an overrun or a slow solve starts the count again', () => {
+  for (const bad of [{ m: 1 }, { o: 1 }, { s: 13 }]) {
+    const REC = fresh();
+    REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 0 }, { t: 'zoom', s: 2, m: 0 }, { t: 'zoom', s: 2, m: 0 }, { t: 'zoom', s: 2, m: 0, ...bad }] });
+    assert.equal(REC.learnt().zoom.learnt, false, JSON.stringify(bad));
+    assert.equal(REC.learnt().zoom.streak, 0);
+  }
+});
+
+test('add reports what was learnt and what slipped in this run', () => {
+  const REC = fresh();
+  REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 0 }, { t: 'zoom', s: 2, m: 0 }] });
+  const s1 = REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 0 }] });
+  assert.deepEqual(plain(s1.learntNew), ['zoom']);
+  const s2 = REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 1 }] });
+  assert.deepEqual(plain(s2.learntLost), ['zoom']);
+});
+
+test('weakTypes: the slowest types relative to their 目安, most overruns first', () => {
+  const REC = fresh();
+  REC.add({ ...run(30), qs: [
+    ...Array.from({ length: 4 }, () => ({ t: 'zoom', s: 1, m: 0 })),
+    ...Array.from({ length: 4 }, () => ({ t: 'resize', s: 9, m: 0, o: 1 })),
+    ...Array.from({ length: 4 }, () => ({ t: 'focus', s: 4, m: 0 }))
+  ] });
+  assert.deepEqual(plain(REC.weakTypes(2)), ['resize', 'focus']);
+  assert.deepEqual(plain(fresh().weakTypes(3)), [], 'nothing to go on yet');
+});
+
+test('skill: the pace of the latest five runs gives the 腕前', () => {
+  const REC = fresh();
+  assert.equal(REC.skill(), null);
+  [75, 60, 45, 36, 30, 30].forEach((t) => REC.add(run(t)));
+  const sk = REC.skill();
+  assert.equal(sk.runs, 5);
+  assert.equal(+sk.pace.toFixed(3), +((60 + 45 + 36 + 30 + 30) / 5 / 15).toFixed(3));
+  assert.ok(sk.lv >= 1 && sk.lv <= 30);
+  assert.ok(sk.toNext > 0);
+  assert.equal(sk.title, '屋敷守', '2.68 秒 per question');
+});
+
+test('skill: practice runs do not count, and rankMul evens out the houses', () => {
+  const REC = fresh();
+  REC.add({ ...run(30), course: 'keiko', n: 15 });
+  assert.equal(REC.skill(), null);
+  REC.add({ course: 'hard', time: 64, raw: 64, misses: 0, n: 16, qs: [] }); // 4 s, ×2 → 2 s
+  assert.equal(REC.skill().pace, 2);
+});
+
+test('add reports the 腕前 before and after', () => {
+  const REC = fresh();
+  REC.add(run(75));
+  const s = REC.add(run(20));
+  assert.ok(s.skill.lv > s.skillFrom.lv);
+});
+
+test('dailyBest: one point per day (Japan time), the best of the day', () => {
+  const REC = fresh();
+  REC.add(run(40, { at: '2026-10-01T01:00:00Z' }));
+  REC.add(run(35, { at: '2026-10-01T05:00:00Z' }));
+  REC.add(run(38, { at: '2026-10-01T16:00:00Z' })); // already the 2nd in Japan
+  assert.deepEqual(plain(REC.dailyBest('easy')), [{ day: '2026-10-01', time: 35 }, { day: '2026-10-02', time: 38 }]);
+});
+
+test('the 稽古の間 is a course for records (rank, par) with its own question count', () => {
+  const REC = fresh();
+  const s = REC.add({ ...run(18), course: 'keiko', n: 9, qs: [] });
+  assert.equal(s.par, 28);
+  assert.equal(REC.courseOf('keiko').practice, true);
+});

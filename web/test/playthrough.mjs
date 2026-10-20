@@ -183,6 +183,11 @@ async function playCourse(page, prefix, prefixOpt, label, how) {
     if (!s.run || s.run.phase !== 'play') break;
     const i = s.run.i;
     seen.add(s.run.type);
+    // The order is in the house, and the 完成図 marks what to change.
+    const ob = await page.$eval('#order .ob-q', (e) => e.textContent).catch(() => '');
+    if (ob !== s.run.order) ok(false, label + ' question ' + (i + 1) + ' (' + s.run.type + '): the order bar says "' + ob + '"');
+    const marks = await page.$$eval('#term .goal, #status .goal-tab', (e) => e.length);
+    if (!marks) ok(false, label + ' question ' + (i + 1) + ' (' + s.run.type + '): no 完成図 mark in the house');
     if (how === 'guide') {
       for (let step = 0; step < 12; step++) {
         const now = await st(page);
@@ -542,6 +547,114 @@ async function sound(browser) {
   await ctx.close();
 }
 
+
+// What the player has learnt folds its 指南 until the 目安 passes; the
+// 稽古の間 asks the weakest types; today's order is fixed for the day.
+async function learning(browser) {
+  const L = '[learn]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.clock.install();
+  await page.goto(PAGE);
+  // Every easy type solved cleanly three times: all learnt. 'resize' slow
+  // and over the 目安: the weak one.
+  await page.evaluate(() => {
+    const types = [...new Set(ADV.levels.COURSES[0].qs)];
+    for (let k = 0; k < 3; k++) {
+      ADV.records.add({ course: 'easy', prefix: 'C-b', time: 30, raw: 30, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: types.map((t) => ({ t, s: 1.5, m: 0 })) });
+    }
+    ADV.records.add({ course: 'normal', prefix: 'C-b', time: 60, raw: 60, misses: 0, overs: 1, guides: 0, keys: 30, n: 20, qs: Array.from({ length: 6 }, () => ({ t: 'resize', s: 13, m: 0, o: 1 })) });
+  });
+  await page.reload();
+  ok(/Lv\.\d+/.test(await page.$eval('#skill', (e) => e.textContent)), L + ' the title shows the 腕前: ' + (await page.$eval('#skill .sk-row', (e) => e.textContent)));
+  ok(/腕前 Lv\.\d+/.test(await page.$eval('#title-meta', (e) => e.textContent)), L + ' the top bar shows the 腕前');
+  ok(await page.$eval('#btn-keiko', (e) => !e.hidden && /襖をずらす/.test(e.textContent)), L + ' the 稽古の間 offers the weak type');
+  ok((await st(page)).quiet === true && await page.evaluate(() => document.body.dataset.quiet === '1'), L + ' the house is quiet by default');
+  await shot(page, 'title-skill');
+
+  // Keyboard: 1 enters the first house.
+  await page.keyboard.press('1');
+  await page.clock.runFor(3000);
+  await waitPlay(page);
+  let s = await st(page);
+  ok(s.run.course === 'easy', L + ' 1 on the title enters 三間屋敷');
+  ok(s.run.folded, L + ' a learnt type starts with its 指南 folded');
+  ok(await page.$('#order .ob-guide.learnt') && !(await page.$('#sashizu .shinan')) && !(await page.$('#order kbd.next')), L + ' folded: no steps, no lit keys, a 覚えた note');
+  ok(s.run.goals >= 1, L + ' the 完成図 still shows what to do');
+  await shot(page, 'play-learnt');
+  ok(await page.$eval('#sashizu', (e) => e.offsetParent === null), L + ' the side panel is hidden unless asked for');
+  await page.clock.runFor(12500);
+  s = await st(page);
+  ok(s.run.stage === 1 && !s.run.folded && !!(await page.$('#order .ob-guide:not(.learnt)')), L + ' past the 目安 the 指南 unfolds');
+  await page.clock.resume();
+  // Today's order: leaving and entering again asks the same order.
+  const first = s.run.qs;
+  await page.click('.quit.to-title');
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  ok(JSON.stringify((await st(page)).run.qs) === JSON.stringify(first), L + ' the same house asks today\'s order again');
+  ok((await st(page)).run.day === await page.evaluate(() => ADV.levels.dayKey()), L + ' the order is today\'s (Japan time)');
+  // The detail panel opens and stays open.
+  await page.click('.detail-toggle');
+  ok(await page.$eval('#sashizu', (e) => e.offsetParent !== null), L + ' 指図の詳細 opens the side panel');
+  await page.click('.detail-toggle');
+  await page.click('.quit.to-title');
+
+  // The 稽古の間 from the keyboard: K.
+  await page.keyboard.press('k');
+  await waitPlay(page);
+  s = await st(page);
+  ok(s.run.course === 'keiko' && s.run.n === 9 && s.run.qs.includes('resize'), L + ' K enters the 稽古の間: 9 questions of the weak types (' + s.run.qs.join(',') + ')');
+  await playCourse(page, 'Control+b', 'C-b', L + ' keiko', 'guide');
+  await waitResult(page, L + ' keiko');
+  ok(/稽古を終えた/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' the 稽古 result says so');
+  ok(!(await page.$('#result-body .name-form')), L + ' a 稽古 run is not offered for the boards');
+  // Enter right away (a key held from the last question) does nothing; then it replays.
+  await page.keyboard.press('Enter');
+  ok((await st(page)).screen === 'result', L + ' Enter straight after the end does not start a new run');
+  await page.waitForTimeout(800);
+  await page.keyboard.press('Enter');
+  await waitPlay(page);
+  ok((await st(page)).run.course === 'keiko', L + ' Enter on the result plays again');
+  await page.click('.quit.to-title');
+  await page.keyboard.press('r');
+  ok((await st(page)).screen === 'records', L + ' R opens the 絵巻');
+  ok(/覚えた仕掛け/.test(await page.$eval('#records-body', (e) => e.textContent)), L + ' the 絵巻 lists what is learnt');
+  await page.keyboard.press('Escape');
+  ok((await st(page)).screen === 'title', L + ' Esc goes back');
+
+  // Quiet off: the decoration may move; the choice is kept.
+  await page.click('.quiet-toggle');
+  ok(await page.evaluate(() => document.body.dataset.quiet === '0'), L + ' 静 toggles the quiet house off');
+  await page.reload();
+  ok((await st(page)).quiet === false, L + ' and the choice is kept');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
+// The long view: a day-by-day chart once there are two days.
+async function longView(browser) {
+  const L = '[long view]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.evaluate(() => {
+    const r = (t, at) => ({ course: 'easy', prefix: 'C-b', time: t, raw: t, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: [], at });
+    ADV.records.add(r(50, '2026-09-01T03:00:00Z'));
+    ADV.records.add(r(41, '2026-09-08T03:00:00Z'));
+    ADV.records.add(r(33, '2026-10-01T03:00:00Z'));
+  });
+  await page.click('#btn-records');
+  await page.click('[data-rec-course="easy"]');
+  ok(await page.$$eval('.daily-chart .dot', (e) => e.length) === 3, L + ' one point per day');
+  ok(/−17\.0 秒/.test(await page.$eval('.daily-l', (e) => e.textContent)), L + ' first day to latest: −17.0 秒');
+  await shot(page, 'long-view');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 const browser = await chromium.launch();
 try {
   await course(browser, 'C-b', 'easy', DESKTOP, 'dark', 'easy-dark');
@@ -555,6 +668,8 @@ try {
   await noSkip(browser);
   await lineEditing(browser);
   await records(browser);
+  await learning(browser);
+  await longView(browser);
   await sound(browser);
 } finally {
   await browser.close();
