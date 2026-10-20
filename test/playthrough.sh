@@ -18,9 +18,16 @@ t() { tmux -L tmux-da "$@"; }
 level() { cat "$STATE/level" 2>/dev/null; }
 target() { cat "$STATE/target"; }
 
+# script(1) takes the command as arguments on macOS/BSD and as -c on Linux.
+ATTACH="tmux -L tmux-da attach -t adv"
+pty() {
+  if script --version >/dev/null 2>&1; then script -q -c "$ATTACH" /dev/null
+  else script -q /dev/null $ATTACH; fi
+}
+
 CLIENT_PID=
 attach() {
-  (sleep 600 | script -q /dev/null tmux -L tmux-da attach -t adv) >/dev/null 2>&1 &
+  (sleep 600 | pty) >/dev/null 2>&1 &
   CLIENT_PID=$!
   for _ in $(seq 50); do
     [ -n "$(t list-clients -F x 2>/dev/null)" ] && return 0
@@ -43,7 +50,7 @@ expect_level() {
 cleanup() {
   "$GAME" reset >/dev/null 2>&1
   [ -n "$CLIENT_PID" ] && { kill "$CLIENT_PID"; wait "$CLIENT_PID"; } 2>/dev/null
-  pkill -f "script -q /dev/null tmux -L tmux-da" 2>/dev/null
+  pkill -f "script -q.*tmux -L tmux-da" 2>/dev/null
   rm -rf "$XDG_STATE_HOME"
 }
 trap cleanup EXIT
