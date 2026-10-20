@@ -13,6 +13,8 @@ export XDG_STATE_HOME
 XDG_STATE_HOME=$(mktemp -d)
 STATE="$XDG_STATE_HOME/tmux-da"
 unset HERDR_ENV TMUX
+# CI runners have no terminal type; tmux will not attach to a "dumb" one.
+case "${TERM:-dumb}" in dumb|unknown) export TERM=xterm-256color ;; esac
 
 t() { tmux -L tmux-da "$@"; }
 level() { cat "$STATE/level" 2>/dev/null; }
@@ -26,14 +28,15 @@ pty() {
 }
 
 CLIENT_PID=
+ATTACH_LOG=$(mktemp)
 attach() {
-  (sleep 600 | pty) >/dev/null 2>&1 &
+  (sleep 600 | pty) >"$ATTACH_LOG" 2>&1 &
   CLIENT_PID=$!
   for _ in $(seq 50); do
     [ -n "$(t list-clients -F x 2>/dev/null)" ] && return 0
     sleep 0.1
   done
-  echo "client did not attach"; return 1
+  echo "client did not attach:"; cat "$ATTACH_LOG"; return 1
 }
 
 fail=0
