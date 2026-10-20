@@ -257,9 +257,16 @@ async function course(browser, prefixOpt, id, viewport, scheme, tag) {
 }
 
 // Following the guide alone solves every question type.
-async function guided(browser) {
-  const L = '[guide]';
+// `platform` 'mac' or 'pc': the resize keys differ (Option+arrow once, or
+// Ctrl+arrow pressed again and again), so both are played on any machine.
+async function guided(browser, platform) {
+  const L = '[guide ' + platform + ']';
   const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const plat = platform === 'mac' ? 'MacIntel' : 'Linux x86_64';
+  await ctx.addInitScript((p) => {
+    Object.defineProperty(Navigator.prototype, 'platform', { get: () => p });
+    Object.defineProperty(Navigator.prototype, 'userAgent', { get: () => p });
+  }, plat);
   const page = await ctx.newPage();
   const errors = watch(page);
   await page.goto(PAGE);
@@ -535,7 +542,8 @@ try {
   await course(browser, 'C-b', 'normal', DESKTOP, 'light', 'normal-light');
   await course(browser, 'C-b', 'hard', PHONE, 'dark', 'hard-phone');
   await course(browser, 'C-b', 'easy', PHONE, 'light', 'easy-phone-light');
-  await guided(browser);
+  await guided(browser, 'mac');
+  await guided(browser, 'pc');
   await noSkip(browser);
   await lineEditing(browser);
   await records(browser);
