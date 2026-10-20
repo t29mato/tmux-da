@@ -223,6 +223,10 @@ async function course(browser, prefixOpt, id, viewport, scheme, tag) {
   await shot(page, `title-${tag}`);
   await page.click(`#course-list [data-course="${id}"]`);
   await waitPlay(page);
+  ok(await page.evaluate(() => document.activeElement && document.activeElement.id === 'sink'), label + ' the key sink has the focus (so Vimium and the like pass keys through)');
+  await page.evaluate(() => document.activeElement.blur());
+  await page.waitForFunction(() => document.activeElement && document.activeElement.id === 'sink');
+  ok(true, label + ' the sink takes the focus back after a blur');
   if (viewport.width < 500) {
     ok(await page.$eval('#keybar', (e) => getComputedStyle(e).display) !== 'none', label + ' the key bar shows on a phone');
   }

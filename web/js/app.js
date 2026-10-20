@@ -894,7 +894,11 @@
     if (S.screen !== 'game') return;
     var t = e.target;
     if (t && t !== document.body && t.id !== 'sink' && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+    // A soft keyboard's keydown carries no key; its text comes as input.
+    if (e.key === 'Unidentified' || e.key === 'Process' || e.isComposing) return;
     var k = { key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey };
+    // A key typed into the focused sink is handled here, never again as input.
+    if (t && t.id === 'sink' && !e.metaKey && (e.key.length === 1 || e.key === 'Enter')) e.preventDefault();
     if (handleKey(k)) e.preventDefault();
   }
 
@@ -1522,10 +1526,28 @@
     S.rows = Math.max(8, Math.floor(box.height / S.cellH));
   }
 
+  // The panes are kept as elements between renders, so a split, a close, a
+  // resize or a zoom can move them (this house is livelier than tmux: real
+  // panes jump, these slide like fusuma). A new window slides the whole view.
+  var view = { session: null, win: null, borders: '' };
+
+  function animateOnce(el, cls) {
+    if (reduceMotion) return;
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+    el.addEventListener('animationend', function done(e) {
+      if (e.target !== el) return;
+      el.classList.remove(cls);
+      el.removeEventListener('animationend', done);
+    });
+  }
+
   function renderTerm() {
     var term = $('#term');
     measureCells();
     if (S.detached) {
+      view.session = view.win = null;
       term.innerHTML = '<div class="outer-shell"><div class="pane-body outer-body">' + linesHTML(S.outer.lines) +
         '<div class="sh-line"><span class="sh-prompt">$ </span>' + withCursor(S.outer.input, S.outer.cur, true) + '</div></div></div>';
       var ob = $('.outer-body', term);
@@ -1537,30 +1559,104 @@
     var cw = S.cellW, ch = S.cellH;
     var active = null;
     lay.panes.forEach(function (r) { if (r.pane.id === win.active) active = r; });
-    var html = '';
+    var fresh = view.session !== S.session || view.win !== win;
+    if (fresh) {
+      var moved = view.session === S.session && view.win;
+      if (moved) animateOnce(term, win.index > view.win.index || S.session.windows.indexOf(view.win) < 0 ? 'slide-next' : 'slide-prev');
+      term.innerHTML = '<div class="glow"></div>';
+      view.borders = '';
+    }
+    view.session = S.session;
+    view.win = win;
+    var old = {};
+    $$(':scope > .pane[data-pane-id]', term).forEach(function (el) { old[el.dataset.paneId] = el; });
     lay.panes.forEach(function (r) {
       var p = r.pane;
       var isActive = p.id === win.active;
       var idx = T.paneIndex(S.session, win, p);
-      html += '<div class="pane' + (isActive ? ' active' : '') + (p.scene ? ' scene-' + p.scene : '') + '" data-pane-id="' + p.id + '" data-scene="' + (p.scene || '') + '" style="left:' + (r.x * cw) + 'px;top:' + (r.y * ch) + 'px;width:' + (r.w * cw) + 'px;height:' + (r.h * ch) + 'px">';
-      html += '<div class="pane-title"><span class="pt-idx">' + idx + '</span>' + (p.name ? '<span class="pt-name">' + esc(p.name) + '</span>' : '') + (win.zoomed ? '<span class="zoom-flag">大広間</span>' : '') + '</div>';
-      html += '<div class="pane-body' + (p.mode === 'copy' ? ' copy' : '') + '" data-pane-body="' + p.id + '">';
-      if (p.mode === 'copy') html += '<div class="copy-ind" data-copy-ind="' + p.id + '">[0/0]</div>';
-      html += sceneHTML(p);
-      html += linesHTML(p.lines, p.mode === 'copy' ? p : null);
-      html += '<div class="sh-line"><span class="sh-prompt">' + esc(promptText(p)) + '</span>' + withCursor(p.input, p.cur, isActive && p.mode !== 'copy') + '</div>';
-      html += '</div></div>';
+      var el = old[p.id];
+      var born = !el;
+      delete old[p.id];
+      if (born) {
+        el = document.createElement('div');
+        el.dataset.paneId = p.id;
+        el.innerHTML = '<div class="decor"></div><div class="pane-title"></div><div class="pane-body"></div>';
+        term.appendChild(el);
+      }
+      var wpx = r.w * cw, hpx = r.h * ch;
+      var room = p.scene ? '' : (p.name || '');
+      var size = hpx < 110 || wpx < 150 ? 'cramped' : '';
+      el.className = 'pane' + (isActive ? ' active' : '') + (p.scene ? ' scene-' + p.scene : '') + (size ? ' ' + size : '') + (el.dataset.anim ? ' ' + el.dataset.anim : '');
+      el.dataset.scene = p.scene || '';
+      el.style.cssText = 'left:' + (r.x * cw) + 'px;top:' + (r.y * ch) + 'px;width:' + wpx + 'px;height:' + hpx + 'px';
+      var decorKey = (p.scene || room) + '|' + size;
+      if (el.dataset.decor !== decorKey) {
+        el.dataset.decor = decorKey;
+        el.firstChild.innerHTML = decorHTML(p.scene, room, size);
+      }
+      el.children[1].innerHTML = '<span class="pt-idx">' + idx + '</span>' + (p.name ? '<span class="pt-name">' + esc(p.name) + '</span>' : '') + (win.zoomed ? '<span class="zoom-flag">大広間</span>' : '');
+      var body = el.children[2];
+      body.className = 'pane-body' + (p.mode === 'copy' ? ' copy' : '');
+      body.dataset.paneBody = p.id;
+      body.innerHTML = (p.mode === 'copy' ? '<div class="copy-ind" data-copy-ind="' + p.id + '">[0/0]</div>' : '') +
+        sceneHTML(p) + linesHTML(p.lines, p.mode === 'copy' ? p : null) +
+        '<div class="sh-line"><span class="sh-prompt">' + esc(promptText(p)) + '</span>' + withCursor(p.input, p.cur, isActive && p.mode !== 'copy') + '</div>';
+      // A room that appears in a window already on screen slides open from
+      // the side it was split off.
+      if (born && !fresh && !reduceMotion) {
+        var anim = 'enter-fade';
+        lay.panes.forEach(function (o) {
+          if (o.x === r.x && o.w === r.w && o.y + o.h + 1 === r.y) anim = 'enter-y';
+          else if (o.y === r.y && o.h === r.h && o.x + o.w + 1 === r.x) anim = 'enter-x';
+        });
+        el.dataset.anim = anim;
+        el.classList.add(anim);
+        el.addEventListener('animationend', function done(e) {
+          if (e.target !== el) return;
+          el.classList.remove(el.dataset.anim);
+          delete el.dataset.anim;
+          el.removeEventListener('animationend', done);
+        });
+      }
     });
+    // Rooms that are gone fold away (and stop counting as rooms at once).
+    Object.keys(old).forEach(function (id) {
+      var el = old[id];
+      el.removeAttribute('data-pane-id');
+      el.removeAttribute('data-scene');
+      $$('[data-pane-body],[data-copy-ind]', el).forEach(function (x) { x.removeAttribute('data-pane-body'); x.removeAttribute('data-copy-ind'); });
+      el.className = 'pane leaving';
+      if (reduceMotion) el.remove();
+      else setTimeout(function () { el.remove(); }, 320);
+    });
+    // The lantern light follows the room you stand in.
+    var glow = $(':scope > .glow', term);
+    if (glow && active) glow.style.cssText = 'left:' + (active.x * cw) + 'px;top:' + (active.y * ch) + 'px;width:' + (active.w * cw) + 'px;height:' + (active.h * ch) + 'px';
+    var bhtml = '';
     lay.borders.forEach(function (b) {
       var near = false;
       if (active) {
         if (b.dir === 'v') near = (active.x + active.w === b.x || active.x === b.x + 1) && active.y < b.y + b.len && b.y < active.y + active.h;
         else near = (active.y + active.h === b.y || active.y === b.y + 1) && active.x < b.x + b.len && b.x < active.x + active.w;
       }
-      html += '<div class="border ' + b.dir + (near ? ' near' : '') + '" style="left:' + (b.x * cw) + 'px;top:' + (b.y * ch) + 'px;width:' + ((b.dir === 'v' ? 1 : b.len) * cw) + 'px;height:' + ((b.dir === 'v' ? b.len : 1) * ch) + 'px"></div>';
+      bhtml += '<div class="border ' + b.dir + (near ? ' near' : '') + '" style="left:' + (b.x * cw) + 'px;top:' + (b.y * ch) + 'px;width:' + ((b.dir === 'v' ? 1 : b.len) * cw) + 'px;height:' + ((b.dir === 'v' ? b.len : 1) * ch) + 'px"></div>';
     });
-    if (S.picker) html += pickerHTML();
-    term.innerHTML = html;
+    if (bhtml !== view.borders) {
+      // Borders move with the rooms; a changed set fades in once they land.
+      var shape = function (h) { return h.replace(/ near/g, ''); };
+      var reshaped = shape(bhtml) !== shape(view.borders);
+      $$(':scope > .border', term).forEach(function (x) { x.remove(); });
+      var tmp = document.createElement('div');
+      tmp.innerHTML = bhtml;
+      while (tmp.firstChild) {
+        if (reshaped && !fresh && !reduceMotion) tmp.firstChild.classList.add('settle');
+        term.appendChild(tmp.firstChild);
+      }
+      view.borders = bhtml;
+    }
+    var pk = $(':scope > .picker', term);
+    if (pk) pk.remove();
+    if (S.picker) term.insertAdjacentHTML('beforeend', pickerHTML());
     // Scroll positions, the copy cursor and the indicator need the DOM.
     lay.panes.forEach(function (r) {
       var p = r.pane;
@@ -1610,6 +1706,73 @@
       html += '<div class="picker-row' + (i === S.picker.idx ? ' on' : '') + '">(' + i + ') ' + esc(s.name) + ': ' + s.windows.length + ' windows' + (s === S.session ? ' (attached)' : '') + '</div>';
     });
     return html + '</div>';
+  }
+
+  // Each room is furnished: tatami underfoot, a piece of furniture on it and
+  // sometimes something on the wall. Drawn faint, behind the shell text.
+  var svg = function (vb, body, cls) { return '<svg class="' + cls + '" viewBox="' + vb + '" aria-hidden="true">' + body + '</svg>'; };
+  var FURNISH = {
+    '茶の間': {
+      furn: svg('0 0 140 70',
+        '<path class="steam" d="M83 20c-3-4 3-6 0-10M95 20c-3-4 3-6 0-10" fill="none" stroke="#b9ab8e" stroke-width="1.6" stroke-linecap="round"/>' +
+        '<rect x="34" y="40" width="5" height="22" fill="#5a3a1a"/><rect x="101" y="40" width="5" height="22" fill="#5a3a1a"/>' +
+        '<path d="M22 36h96v5c0 3-21 6-48 6s-48-3-48-6z" fill="#6e4520"/><ellipse cx="70" cy="36" rx="48" ry="9" fill="#9a6532"/>' +
+        '<ellipse cx="70" cy="35" rx="42" ry="6.5" fill="none" stroke="#b07a45" stroke-width="0.8"/>' +
+        '<ellipse cx="57" cy="29" rx="9" ry="7" fill="#4f6440"/><path d="M48 27l-7-4" stroke="#4f6440" stroke-width="3" stroke-linecap="round"/>' +
+        '<path d="M65 25l9-6" stroke="#5a3a1a" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="57" cy="22.5" rx="4" ry="1.6" fill="#3d4f31"/>' +
+        '<path d="M80 23h7l-1 9h-5z" fill="#efe6d2" stroke="#9a8f7c" stroke-width="0.8"/><path d="M92 23h7l-1 9h-5z" fill="#efe6d2" stroke="#9a8f7c" stroke-width="0.8"/>' +
+        '<circle cx="36" cy="32" r="4" fill="#e98a2a"/><circle cx="43" cy="33" r="3.6" fill="#f09a35"/>', 'furn'),
+      wall: svg('0 0 40 86',
+        '<rect x="5" y="2" width="30" height="80" rx="3" fill="#6e4520"/><circle cx="20" cy="20" r="11" fill="#f6efdd" stroke="#3a2a14" stroke-width="1.2"/>' +
+        '<path d="M20 20V12M20 20l5 3" stroke="#2b2622" stroke-width="1.4" stroke-linecap="round"/>' +
+        '<rect x="10" y="36" width="20" height="40" fill="#3a2a14"/><g class="pendulum"><path d="M20 36v28" stroke="#c9a24a" stroke-width="1.2"/><circle cx="20" cy="66" r="4.5" fill="#d9b25a"/></g>', 'wall')
+    },
+    '座敷': {
+      furn: svg('0 0 140 70',
+        '<rect x="62" y="50" width="70" height="8" fill="#5a3a1a"/><rect x="62" y="48" width="70" height="3" fill="#8a5a2b"/>' +
+        '<path d="M92 47c-6-2-7-12-2-16h12c5 4 4 14-2 16z" fill="#3b4a5c"/>' +
+        '<path d="M96 31c-2-10-8-16-16-22M96 31c3-8 10-12 18-14M96 31c0-8 2-16 0-24" fill="none" stroke="#4a3a24" stroke-width="1.4" stroke-linecap="round"/>' +
+        '<circle cx="80" cy="9" r="3.4" fill="#b9322a"/><circle cx="114" cy="17" r="3" fill="#b9322a"/><circle cx="96" cy="7" r="2.6" fill="#c84b3c"/>' +
+        '<path d="M86 14l4-1M104 20l4 1M93 19l3 2" stroke="#5d7a4a" stroke-width="2.4" stroke-linecap="round"/>', 'furn')
+    },
+    '納戸': {
+      furn: svg('0 0 140 70',
+        '<rect x="70" y="34" width="56" height="28" rx="2" fill="#3a2a14"/><path d="M70 40h56" stroke="#5a4322" stroke-width="2"/><path d="M98 34v28" stroke="#b9322a" stroke-width="2"/>' +
+        '<rect x="78" y="14" width="40" height="20" rx="2" fill="#7a5a32"/><path d="M78 19h40" stroke="#5a4322" stroke-width="1.5"/>' +
+        '<rect x="22" y="44" width="40" height="18" rx="2" fill="#a07c48"/><path d="M22 49h40M42 44v18" stroke="#6e5530" stroke-width="1.2"/>', 'furn')
+    },
+    '書院': {
+      furn: svg('0 0 140 70',
+        '<rect x="30" y="36" width="80" height="6" fill="#7a4a22"/><rect x="34" y="42" width="5" height="20" fill="#5a3a1a"/><rect x="101" y="42" width="5" height="20" fill="#5a3a1a"/>' +
+        '<rect x="44" y="28" width="16" height="8" rx="1.5" fill="#2b2622"/><path d="M70 34l26-8" stroke="#3a2a14" stroke-width="2" stroke-linecap="round"/><path d="M93 27l5-1.5" stroke="#efe6d2" stroke-width="2.4" stroke-linecap="round"/>' +
+        '<rect x="62" y="31" width="22" height="5" fill="#fbf6ea" stroke="#cdbf9f" stroke-width="0.6"/>', 'furn'),
+      wall: svg('0 0 70 70',
+        '<circle cx="35" cy="35" r="31" fill="#fbf6ea" stroke="#6e4520" stroke-width="4"/>' +
+        '<path d="M35 4v62M4 35h62M19 6v58M51 6v58M6 19h58M6 51h58" stroke="#8a6a3a" stroke-width="1"/>' +
+        '<path d="M12 50c10-8 20-6 26-16" fill="none" stroke="#5d7a4a" stroke-width="2" opacity="0.5"/>', 'wall')
+    },
+    '次の間': {
+      furn: svg('0 0 140 70',
+        '<path d="M20 12l26 6v44l-26-6z" fill="#d8b25a"/><path d="M46 18l26-6v44l-26 6z" fill="#e6c46a"/><path d="M72 12l26 6v44l-26-6z" fill="#d8b25a"/><path d="M98 18l26-6v44l-26 6z" fill="#e6c46a"/>' +
+        '<path d="M20 12l26 6 26-6 26 6 26-6M20 56l26 6 26-6 26 6 26-6" fill="none" stroke="#2b2622" stroke-width="1.6"/>' +
+        '<path d="M34 40c12-4 20-14 40-12s28 10 44 4" fill="none" stroke="#4a5d3a" stroke-width="3" stroke-linecap="round"/>' +
+        '<path d="M58 24c4-4 10-4 14 0M84 30c4-4 10-4 14 0" fill="none" stroke="#3d4f31" stroke-width="4" stroke-linecap="round"/>', 'furn')
+    },
+    '仏間': {
+      furn: svg('0 0 140 70',
+        '<rect x="80" y="4" width="44" height="58" fill="#1f1a16"/><rect x="85" y="10" width="34" height="40" fill="#7a5a20"/><path d="M85 10l17-6 17 6" fill="none" stroke="#d9b25a" stroke-width="1.5"/>' +
+        '<rect x="99" y="24" width="6" height="16" fill="#d9b25a"/><rect x="83" y="50" width="38" height="4" fill="#d9b25a"/>' +
+        '<rect x="58" y="44" width="4" height="18" fill="#f6efdd"/><path class="flame" d="M60 36c-3 3-3 6 0 8 3-2 3-5 0-8z" fill="#f0a33a"/>' +
+        '<path d="M40 56h14l-2 6h-10z" fill="#8a6a3a"/><path class="steam" d="M47 54c-2-4 2-6 0-12" fill="none" stroke="#b9ab8e" stroke-width="1.2"/>', 'furn')
+    }
+  };
+
+  function decorHTML(scene, room, size) {
+    if (scene === 'makimono') return '';
+    var html = '<div class="tatami"></div>';
+    var f = FURNISH[room];
+    if (f && !size) html += f.furn + (f.wall || '');
+    return html;
   }
 
   // What a staged pane shows above its shell: the room's name, large.
@@ -1956,12 +2119,12 @@
       (w.strong ? '<p class="w-strong">得意: <b>' + esc(Q[w.strong.type].text || '棟を渡る') + '</b> 平均 ' + w.strong.avg.toFixed(1) + '秒</p>' : '') + '</div>';
   }
 
+  // The sink keeps the focus during play: on phones it raises the soft
+  // keyboard, and on desktops a focused text field makes key-grabbing
+  // extensions (Vimium and the like) step aside and pass every key through.
   function focusSink() {
-    // Only phones need the sink focused (it raises the soft keyboard).
-    if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
-      var sink = $('#sink');
-      if (sink && S.screen === 'game') sink.focus();
-    }
+    var sink = $('#sink');
+    if (sink && S.screen === 'game' && document.activeElement !== sink) sink.focus({ preventScroll: true });
   }
 
   // ---- wiring ------------------------------------------------------------
@@ -2013,6 +2176,8 @@
     var sink = $('#sink');
     sink.addEventListener('input', onSinkInput);
     $('#term').addEventListener('pointerdown', function () { focusSink(); });
+    // Vimium's Esc, a click on a key button: take the focus straight back.
+    $('#sink').addEventListener('blur', function () { setTimeout(focusSink, 0); });
     $('#keybar').addEventListener('click', function (e) {
       var b = e.target.closest('button');
       if (!b) return;

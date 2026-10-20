@@ -249,8 +249,52 @@ body[data-armed="repeat"] .term { box-shadow: 0 0 0 2px var(--moss); }
 .probe { position: absolute; visibility: hidden; white-space: pre; font-family: var(--mono); font-size: 14px; line-height: 20px; top: 0; left: 0; }
 @media (max-width: 760px) { .probe { font-size: 13px; } }
 
-.pane { position: absolute; overflow: hidden; }
-.pane.active { background: radial-gradient(420px 260px at 50% 60%, #fff3d2, transparent); }
+.pane { position: absolute; overflow: hidden; z-index: 1; transition: left 280ms cubic-bezier(.3,.7,.2,1), top 280ms cubic-bezier(.3,.7,.2,1), width 280ms cubic-bezier(.3,.7,.2,1), height 280ms cubic-bezier(.3,.7,.2,1); }
+.pane-title, .pane-body { z-index: 1; }
+.pane-title { position: relative; }
+/* the lantern light: glides to the room you stand in */
+.glow { position: absolute; z-index: 0; pointer-events: none; background: radial-gradient(closest-side, rgba(255, 233, 180, 0.95), rgba(255, 233, 180, 0.35) 70%, transparent); transition: left 260ms ease-out, top 260ms ease-out, width 260ms ease-out, height 260ms ease-out; }
+/* a new room slides open from the fusuma it was split off */
+.pane.enter-x { animation: fusuma-x 340ms cubic-bezier(.3,.7,.2,1); }
+.pane.enter-y { animation: fusuma-y 340ms cubic-bezier(.3,.7,.2,1); }
+.pane.enter-fade { animation: room-fade 300ms ease-out; }
+@keyframes fusuma-x { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes fusuma-y { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes room-fade { from { opacity: 0; } }
+/* a closed room folds away */
+.pane.leaving { z-index: 0; pointer-events: none; animation: room-fold 300ms ease-in forwards; }
+@keyframes room-fold { to { opacity: 0; transform: scale(0.9); filter: blur(1px); } }
+.border { z-index: 2; transition: left 280ms cubic-bezier(.3,.7,.2,1), top 280ms cubic-bezier(.3,.7,.2,1), width 280ms, height 280ms; }
+.border.settle { animation: settle 420ms ease-out; }
+@keyframes settle { 0%, 55% { opacity: 0; } 100% { opacity: 1; } }
+/* another wing: the whole view slides like a big fusuma */
+.term.slide-next { animation: slide-next 380ms cubic-bezier(.3,.7,.2,1); }
+.term.slide-prev { animation: slide-prev 380ms cubic-bezier(.3,.7,.2,1); }
+@keyframes slide-next { from { transform: translateX(8%); opacity: 0.2; } }
+@keyframes slide-prev { from { transform: translateX(-8%); opacity: 0.2; } }
+
+/* furnishing: tatami underfoot, a piece of furniture, sometimes the wall */
+.decor { position: absolute; inset: 20px 0 0 0; z-index: 0; pointer-events: none; }
+.tatami {
+  position: absolute; left: 0; right: 0; bottom: 0; height: min(24%, 42px);
+  background:
+    repeating-linear-gradient(0deg, rgba(90, 80, 30, 0.10) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, #cfc58c 0 calc(50% - 4px), #3f4a2c calc(50% - 4px) 50%);
+  background-size: auto, 220px 100%;
+  border-top: 3px solid #8a6a3a; opacity: 0.55;
+}
+.pane.active .tatami { opacity: 0.8; }
+.pane.cramped .tatami { height: 10px; border-top-width: 2px; }
+.decor .furn { position: absolute; right: 6%; bottom: min(8%, 14px); height: min(48%, 96px); width: auto; max-width: 70%; opacity: 0.42; transition: opacity 260ms; }
+.decor .wall { position: absolute; top: 6px; right: 12px; height: min(32%, 72px); width: auto; opacity: 0.4; transition: opacity 260ms; }
+.pane.active .decor .furn, .pane.active .decor .wall { opacity: 0.85; }
+.decor .pendulum { transform-origin: 20px 36px; animation: pendulum 2s ease-in-out infinite alternate; }
+@keyframes pendulum { from { transform: rotate(-9deg); } to { transform: rotate(9deg); } }
+.decor .steam { animation: steam 2.6s ease-in-out infinite; }
+@keyframes steam { 0% { opacity: 0; transform: translateY(4px); } 40% { opacity: 0.9; } 100% { opacity: 0; transform: translateY(-6px); } }
+.decor .flame { transform-origin: 60px 44px; animation: flame 1.3s ease-in-out infinite alternate; }
+@keyframes flame { from { transform: scale(0.9, 0.95); opacity: 0.85; } to { transform: scale(1.05, 1.1); opacity: 1; } }
+.pane.scene-akima .tatami { opacity: 0.35; }
 .pane-title { height: 20px; line-height: 20px; display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; padding: 0 0.5ch; color: var(--term-dim); }
 .pt-idx { font-size: 11px; color: var(--term-dim); }
 .pt-name { font-family: var(--mincho); font-size: 12.5px; background: #fff; border: 1px solid var(--paper-line); padding: 0 7px; line-height: 16px; color: var(--sumi-dim); }
