@@ -1,0 +1,423 @@
+#!/usr/bin/env bash
+# tmux打 — learn tmux by playing inside a real (but separate) tmux.
+#
+# The game runs on its own socket (-L tmux-da) with its own config, so
+# it never touches the player's tmux server or ~/.tmux.conf. A background
+# watcher polls the session state and advances the level when the goal holds.
+#
+# Written for bash 3.2 (macOS /bin/bash): no associative arrays, no ${x,,}.
+
+set -u
+
+SOCK=tmux-da
+SESSION=adv
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/tmux-da"
+CONF="$STATE_DIR/tmux.conf"
+LAST_LEVEL=11
+
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+t() { tmux -L "$SOCK" -f "$CONF" "$@"; }
+
+state_get() { cat "$STATE_DIR/$1" 2>/dev/null || printf '%s' "${2:-}"; }
+state_set() { printf '%s' "$2" > "$STATE_DIR/$1"; }
+
+PREFIX="$(state_get prefix C-b)"
+
+# ---------------------------------------------------------------- keys ----
+
+prefix_label() {
+  case "$PREFIX" in
+    C-b) echo 'Ctrl+b' ;;
+    C-a) echo 'Ctrl+a' ;;
+    *) echo "$PREFIX" ;;
+  esac
+}
+
+key() {
+  case "$1" in
+    split_lr) echo '%  (Shift+5)' ;;
+    split_tb) echo '"（ダブルクォート）' ;;
+    focus) echo '矢印キー' ;;
+    zoom) echo 'z（もう一度押すと元に戻る）' ;;
+    close) echo 'x → 確認に y' ;;
+    new_window) echo 'c' ;;
+    select_window) echo 'n / p（次・前）か、番号キー' ;;
+    rename) echo ',（カンマ）→ 名前を入力して Enter' ;;
+    resize) echo 'Ctrl+矢印キー（prefix のあと Ctrl を押したまま連打できる）' ;;
+    copy) echo '[ （抜けるときは q）' ;;
+    detach) echo 'd' ;;
+  esac
+}
+
+hint() { echo "$(prefix_label) を押して離してから $(key "$1")"; }
+
+# ---------------------------------------------------------------- config --
+
+write_conf() {
+  mkdir -p "$STATE_DIR"
+  {
+    echo "set -g status 2"
+    echo "set -g status-style 'bg=colour236,fg=colour252'"
+    echo "set -g status-format[1] '#[align=left,fg=colour221] #{@adv_quest}'"
+    echo "set -g @adv_quest '冒険の準備中…'"
+    echo "set -g history-limit 5000"
+    echo "set -g escape-time 10"
+    echo "set -g mouse off"
+    echo "setw -g pane-border-status top"
+    echo "setw -g pane-border-format ' #{pane_index}#{?#{@name}, #{@name},} '"
+    echo "bind i display-popup -w 72 -h 18 -E \"'$SELF' _brief\""
+    if [ "$PREFIX" != "C-b" ]; then
+      echo "set -g prefix $PREFIX"
+      echo "unbind C-b"
+      echo "bind $PREFIX send-prefix"
+    fi
+  } > "$CONF"
+}
+
+# ---------------------------------------------------------------- queries -
+
+cur() { t display-message -p -t "$SESSION:" "$1" 2>/dev/null; }
+panes() { t list-panes -t "$SESSION:" -F "$1" 2>/dev/null; }
+pane_exists() { t list-panes -s -t "$SESSION" -F '#{pane_id}' 2>/dev/null | grep -qx "$1"; }
+first_client() { t list-clients -t "$SESSION" -F '#{client_name}' 2>/dev/null | head -n 1; }
+
+set_quest() {
+  t set -g @adv_quest "$1" 2>/dev/null
+  t refresh-client -S 2>/dev/null
+}
+
+# Respawn a pane with a scene, then hand it back to a normal shell.
+stage_pane() {
+  local id=$1 scene=$2 name=$3
+  t respawn-pane -k -t "$id" "'$SELF' _art $scene; exec \"\${SHELL:-/bin/sh}\"" 2>/dev/null
+  t set -p -t "$id" @name "$name" 2>/dev/null
+}
+
+# ---------------------------------------------------------------- levels --
+# Each level has: title, story, goal, hint action, setup, check.
+
+title() {
+  case $1 in
+    1) echo '縦の壁' ;;
+    2) echo '地下への階段' ;;
+    3) echo '宝のありか' ;;
+    4) echo '望遠鏡' ;;
+    5) echo 'モンスター退治' ;;
+    6) echo '陣地を広げる' ;;
+    7) echo '新しい部屋' ;;
+    8) echo '名付け' ;;
+    9) echo '帰り道' ;;
+    10) echo '古文書' ;;
+    11) echo '旅立ち' ;;
+  esac
+}
+
+story() {
+  case $1 in
+    1) echo 'ここは tmux の世界。いまの部屋（ウィンドウ）には、窓（ペイン）がひとつしかない。'
+       echo '壁を立てて、部屋を左右に分けよう。' ;;
+    2) echo '右と左、どちらかの窓の床に、地下への階段が隠れている。'
+       echo '窓を上下に分けて、階段を見つけよう。' ;;
+    3) echo 'どこかの窓に「宝箱」が現れた（枠の上に名前が出ている）。'
+       echo '窓から窓へ移動して、宝箱のある窓を選ぼう。' ;;
+    4) echo '宝箱の中に望遠鏡があった。'
+       echo 'いまの窓を画面いっぱいに広げて、遠くを見てみよう。' ;;
+    5) echo '大変だ、モンスターの窓が現れた！'
+       echo '移動してモンスターの窓を選び、窓ごと閉じて退治しよう。' ;;
+    6) echo '戦いで陣地が狭くなった。'
+       echo 'いまの窓の大きさを変えて、陣地を広げよう（幅か高さを大きく変える）。' ;;
+    7) echo 'この部屋はもう窓でいっぱいだ。'
+       echo '新しい部屋（ウィンドウ）を作ろう。下のステータスバーに部屋の一覧が出ている。' ;;
+    8) echo '新しい部屋には名前がない。'
+       echo 'いまの部屋の名前を camp に変えよう。' ;;
+    9) echo '最初の部屋 home に、忘れ物をしてきた。'
+       echo '部屋を移動して home に戻ろう。' ;;
+    10) echo 'home の窓のひとつに、長い古文書（スクロール）が現れた。'
+        echo 'その窓を選び、コピーモードに入って、一番上まで読み上げよう。'
+        echo '（コピーモードでは PageUp か ↑ で上へ。Mac は fn+↑ が PageUp）' ;;
+    11) echo '最後の試練。tmux のセッションは、画面を閉じても裏で生き続ける。'
+        echo 'いったん離脱（デタッチ）して、もう一度 tmux-da と打って戻ってこよう。'
+        echo '（普段の tmux なら、戻るコマンドは tmux attach）' ;;
+  esac
+}
+
+action() {
+  case $1 in
+    1) echo split_lr ;; 2) echo split_tb ;; 3) echo focus ;; 4) echo zoom ;;
+    5) echo close ;; 6) echo resize ;; 7) echo new_window ;; 8) echo rename ;;
+    9) echo select_window ;; 10) echo copy ;; 11) echo detach ;;
+  esac
+}
+
+goal() {
+  case $1 in
+    1) echo '窓を左右に分ける' ;;
+    2) echo '窓を上下に分ける' ;;
+    3) echo '宝箱の窓を選ぶ' ;;
+    4) echo '窓を全画面にする' ;;
+    5) echo 'モンスターの窓を閉じる' ;;
+    6) echo '窓の大きさを変える' ;;
+    7) echo '新しいウィンドウを作る' ;;
+    8) echo 'ウィンドウ名を camp にする' ;;
+    9) echo 'home のウィンドウに戻る' ;;
+    10) echo '古文書の窓で、コピーモードで一番上まで戻る' ;;
+    11) echo 'デタッチして、tmux-da で戻る' ;;
+  esac
+}
+
+setup() {
+  case $1 in
+    3)
+      if [ "$(panes '#{pane_id}' | wc -l)" -lt 2 ]; then t split-window -d -t "$SESSION:"; fi
+      local id
+      id=$(panes '#{pane_active} #{pane_id}' | awk '$1==0{print $2}' | tail -n 1)
+      stage_pane "$id" treasure '宝箱'
+      state_set target "$id" ;;
+    5)
+      if [ "$(cur '#{window_zoomed_flag}')" = 1 ]; then t resize-pane -Z -t "$SESSION:"; fi
+      local id
+      id=$(t split-window -d -P -F '#{pane_id}' -t "$SESSION:")
+      stage_pane "$id" monster 'モンスター'
+      state_set target "$id" ;;
+    6)
+      state_set target "$(cur '#{pane_id}')"
+      state_set size "$(cur '#{pane_width} #{pane_height}')" ;;
+    7)
+      state_set count "$(t list-windows -t "$SESSION" | wc -l | tr -d ' ')" ;;
+    9)
+      if ! t list-windows -t "$SESSION" -F '#{window_name}' | grep -qx home; then
+        t new-window -d -t "$SESSION" -n home
+      fi ;;
+    10)
+      local win id
+      win=$(t list-windows -t "$SESSION" -F '#{window_name} #{window_id}' | awk '$1=="home"{print $2; exit}')
+      id=$(t split-window -d -P -F '#{pane_id}' -t "$win")
+      stage_pane "$id" scroll '古文書'
+      state_set target "$id" ;;
+    11)
+      state_set phase 0 ;;
+  esac
+}
+
+check() {
+  case $1 in
+    1) panes '#{pane_top}' | sort | uniq -d | grep -q . ;;
+    2) panes '#{pane_left}' | sort | uniq -d | grep -q . ;;
+    3) [ "$(cur '#{pane_id}')" = "$(state_get target)" ] ;;
+    4) [ "$(cur '#{window_zoomed_flag}')" = 1 ] ;;
+    5) ! pane_exists "$(state_get target)" ;;
+    6)
+      local target now
+      target=$(state_get target)
+      if ! pane_exists "$target"; then setup 6; return 1; fi
+      now=$(t display-message -p -t "$target" '#{pane_width} #{pane_height}')
+      set -- $(state_get size) $now
+      [ $(( $1 > $3 ? $1 - $3 : $3 - $1 )) -ge 8 ] || [ $(( $2 > $4 ? $2 - $4 : $4 - $2 )) -ge 4 ] ;;
+    7) [ "$(t list-windows -t "$SESSION" | wc -l | tr -d ' ')" -gt "$(state_get count 99)" ] ;;
+    8) t list-windows -t "$SESSION" -F '#{window_name}' | grep -qx camp ;;
+    9) [ "$(cur '#{window_name}')" = home ] ;;
+    10)
+      local target
+      target=$(state_get target)
+      if ! pane_exists "$target"; then setup 10; return 1; fi
+      set -- $(t display-message -p -t "$target" '#{pane_in_mode} #{scroll_position} #{history_size}')
+      [ "$1" = 1 ] && [ "${2:-0}" -ge $(( ${3:-0} - 2 )) ] && [ "${3:-0}" -gt 50 ] ;;
+    11)
+      local attached
+      attached=$(t display-message -p -t "$SESSION" '#{session_attached}')
+      if [ "$attached" = 0 ]; then state_set phase 1; return 1; fi
+      [ "$(state_get phase 0)" = 1 ] ;;
+  esac
+}
+
+# ---------------------------------------------------------------- scenes --
+
+art() {
+  case $1 in
+    treasure)
+      printf '\n\n      \033[33m  ___________\n       /          /|\n      /__________/ |\n      |  [ 宝 ]  | |\n      |__________|/\033[0m\n\n      宝箱を見つけた？ この窓を選ぼう。\n\n' ;;
+    monster)
+      printf '\n\n      \033[31m  /\\_/\\\n       ( o.o )   ガオー！\n        > ^ <\033[0m\n\n      この窓を選んで、閉じて退治しよう。\n\n' ;;
+    scroll)
+      printf '\033[36m==== 古文書 第一行 ====\033[0m\n'
+      printf '\033[33m合言葉は「ひらけ、ごま」\033[0m\n'
+      local i=3
+      while [ $i -le 300 ]; do
+        printf '%3d  ……長い長い文章が続く……\n' "$i"
+        i=$((i + 1))
+      done
+      printf '\n上には何が書いてあった？ コピーモードで一番上まで戻ろう。\n' ;;
+  esac
+}
+
+# ---------------------------------------------------------------- UI ------
+
+brief() {
+  local n=${1:-$(state_get level 1)} prev=${2:-}
+  clear
+  if [ -n "$prev" ]; then
+    printf '\033[32m✔ 「%s」クリア！\033[0m\n\n' "$(title "$prev")"
+  fi
+  if [ "$n" -gt "$LAST_LEVEL" ]; then
+    finale
+  else
+    printf '\033[1;33m Lv %s / %s  %s\033[0m\n\n' "$n" "$LAST_LEVEL" "$(title "$n")"
+    story "$n" | sed 's/^/  /'
+    printf '\n  \033[1m目標\033[0m  %s\n' "$(goal "$n")"
+    printf '  \033[1mキー\033[0m  %s\n' "$(hint "$(action "$n")")"
+    printf '\n  \033[2m説明をもう一度見る: %s を押して離してから i\033[0m\n' "$(prefix_label)"
+  fi
+  printf '\n  \033[2m（何かキーを押すと閉じる）\033[0m'
+  read -rsn1
+}
+
+finale() {
+  printf '\033[1;33m 🎉 全11面クリア！ tmux の基本はもう指に入っている。\033[0m\n\n'
+  cheat | sed 's/^/  /'
+}
+
+cheat() {
+  local n=1
+  printf 'prefix = %s\n\n' "$(prefix_label)"
+  while [ $n -le $LAST_LEVEL ]; do
+    printf '・%s\n    → %s\n' "$(goal $n)" "$(key "$(action $n)")"
+    n=$((n + 1))
+  done
+}
+
+quest_line() {
+  local n=$1
+  if [ "$n" -gt "$LAST_LEVEL" ]; then
+    echo "🎉 全面クリア！  早見表: tmux-da cheat ｜ 終了: tmux-da reset"
+  else
+    echo "Lv$n/$LAST_LEVEL $(title "$n") ▶ $(goal "$n") ｜ $(hint "$(action "$n")") ｜ 説明: $(prefix_label) → i"
+  fi
+}
+
+show_brief() {
+  local client
+  client=$(first_client)
+  [ -n "$client" ] || return 0
+  t display-popup -c "$client" -w 72 -h 18 -E "'$SELF' _brief $1 ${2:-}" 2>/dev/null
+}
+
+# ---------------------------------------------------------------- watcher -
+
+watch() {
+  local level shown=0
+  level=$(state_get level 1)
+  set_quest "$(quest_line "$level")"
+  while t has-session -t "$SESSION" 2>/dev/null; do
+    if [ "$level" -le "$LAST_LEVEL" ] && check "$level"; then
+      local prev=$level
+      level=$((level + 1))
+      # Set the level up before publishing it, so whoever reads the level file
+      # (status, the tests) sees the new panes and target already in place.
+      setup "$level"
+      state_set level "$level"
+      set_quest "$(quest_line "$level")"
+      show_brief "$level" "$prev" &
+      shown=1
+    elif [ $shown = 0 ] && [ -n "$(first_client)" ]; then
+      show_brief "$level" &
+      shown=1
+    fi
+    sleep 0.4
+  done
+}
+
+ensure_watcher() {
+  local pid
+  pid=$(state_get watcher.pid)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then return; fi
+  nohup "$SELF" _watch >/dev/null 2>&1 &
+  state_set watcher.pid "$!"
+}
+
+# ---------------------------------------------------------------- commands
+
+usage() {
+  cat <<EOF
+tmux打 — 本物の tmux の中で遊びながら覚えるゲーム（全${LAST_LEVEL}面）
+
+使い方:
+  tmux-da [start] [--prefix C-b|C-a]
+      冒険を始める／続きから再開する
+      --prefix      prefix キー。herdr や tmux の中で起動したときは、自動で C-a になる
+  tmux-da cheat    キーの早見表
+  tmux-da status   いまの面
+  tmux-da reset    セッションと進み具合を消す
+
+ゲームは専用のソケットで動くので、普段の tmux には影響しません。
+EOF
+}
+
+start() {
+  local prefix="" attach=1
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --prefix) prefix=${2:-}; shift ;;
+      --no-attach) attach=0 ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "不明なオプション: $1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+  done
+
+  command -v tmux >/dev/null || { echo "tmux が見つかりません（brew install tmux）" >&2; exit 1; }
+  mkdir -p "$STATE_DIR"
+
+  if ! tmux -L "$SOCK" has-session -t "$SESSION" 2>/dev/null; then
+    if [ -z "$prefix" ]; then
+      if [ "${HERDR_ENV:-}" = 1 ] || [ -n "${TMUX:-}" ]; then
+        prefix=C-a
+        echo "herdr／tmux の中なので、Ctrl+b の取り合いを避けて prefix を Ctrl+a にします。"
+        echo "（素のターミナルで起動すれば Ctrl+b で遊べます）"
+        sleep 2
+      else
+        prefix=C-b
+      fi
+    fi
+    PREFIX=$prefix
+    state_set prefix "$PREFIX"
+    [ -f "$STATE_DIR/level" ] || state_set level 1
+    write_conf
+    t new-session -d -s "$SESSION" -n home -x 160 -y 45
+    t set -w -t "$SESSION:home" automatic-rename off
+    local level
+    level=$(state_get level 1)
+    # Resuming a level that needs its stage (treasure, monster, ...) rebuilds it.
+    [ "$level" -le "$LAST_LEVEL" ] && setup "$level"
+  fi
+
+  ensure_watcher
+  if [ $attach = 1 ]; then
+    TMUX='' exec tmux -L "$SOCK" attach -t "$SESSION"
+  fi
+}
+
+reset() {
+  tmux -L "$SOCK" kill-server 2>/dev/null
+  local pid
+  pid=$(state_get watcher.pid)
+  [ -n "$pid" ] && kill "$pid" 2>/dev/null
+  rm -rf "$STATE_DIR"
+  echo "冒険をリセットしました。"
+}
+
+case "${1:-start}" in
+  start) shift 2>/dev/null; start "$@" ;;
+  --keys|--prefix|--no-attach) start "$@" ;;
+  cheat) cheat ;;
+  status)
+    n=$(state_get level 1)
+    if [ "$n" -gt "$LAST_LEVEL" ]; then echo "全面クリア済み"; else quest_line "$n"; fi ;;
+  reset) reset ;;
+  help|-h|--help) usage ;;
+  _watch) watch ;;
+  _brief) brief "${2:-}" "${3:-}" ;;
+  _art) art "$2" ;;
+  _check) check "$2" && echo pass || echo fail ;;
+  *) usage >&2; exit 2 ;;
+esac
