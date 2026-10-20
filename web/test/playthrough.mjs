@@ -211,10 +211,20 @@ async function waitResult(page, label) {
   }
 }
 
-async function course(browser, prefixOpt, id, viewport, scheme, tag) {
+// Pretend to be a Mac or a PC: the resize keys differ (see guided()).
+async function setPlatform(ctx, platform) {
+  const p = platform === 'mac' ? 'MacIntel' : 'Linux x86_64';
+  await ctx.addInitScript((p) => {
+    Object.defineProperty(Navigator.prototype, 'platform', { get: () => p });
+    Object.defineProperty(Navigator.prototype, 'userAgent', { get: () => p });
+  }, p);
+}
+
+async function course(browser, prefixOpt, id, viewport, scheme, tag, platform = 'mac') {
   const prefix = prefixOpt === 'C-a' ? 'Control+a' : 'Control+b';
-  const label = `[${id} ${prefixOpt} ${viewport.width}px ${scheme}]`;
+  const label = `[${id} ${platform} ${viewport.width}px ${scheme}]`;
   const ctx = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: 'reduce' });
+  await setPlatform(ctx, platform);
   const page = await ctx.newPage();
   const errors = watch(page);
   await page.goto(PAGE);
@@ -262,11 +272,7 @@ async function course(browser, prefixOpt, id, viewport, scheme, tag) {
 async function guided(browser, platform) {
   const L = '[guide ' + platform + ']';
   const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
-  const plat = platform === 'mac' ? 'MacIntel' : 'Linux x86_64';
-  await ctx.addInitScript((p) => {
-    Object.defineProperty(Navigator.prototype, 'platform', { get: () => p });
-    Object.defineProperty(Navigator.prototype, 'userAgent', { get: () => p });
-  }, plat);
+  await setPlatform(ctx, platform);
   const page = await ctx.newPage();
   const errors = watch(page);
   await page.goto(PAGE);
@@ -540,7 +546,9 @@ const browser = await chromium.launch();
 try {
   await course(browser, 'C-b', 'easy', DESKTOP, 'dark', 'easy-dark');
   await course(browser, 'C-b', 'normal', DESKTOP, 'light', 'normal-light');
+  await course(browser, 'C-b', 'normal', DESKTOP, 'dark', 'normal-pc', 'pc');
   await course(browser, 'C-b', 'hard', PHONE, 'dark', 'hard-phone');
+  await course(browser, 'C-b', 'hard', DESKTOP, 'light', 'hard-pc', 'pc');
   await course(browser, 'C-b', 'easy', PHONE, 'light', 'easy-phone-light');
   await guided(browser, 'mac');
   await guided(browser, 'pc');
