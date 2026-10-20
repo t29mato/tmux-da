@@ -513,8 +513,9 @@ async function arena(browser, prefixOpt, course, viewport, tag) {
   await page.waitForFunction(() => { const b = window.tmuxDa.state().battle; return b && b.phase === 'fight'; }, null, { timeout: 5000 });
   // One deliberate miss: a key the question does not want.
   if (course === 'easy') {
+    // Unbound, so the board stays solvable whatever question comes first.
     await page.keyboard.press(prefix);
-    await page.keyboard.press('c');
+    await page.keyboard.press('Y');
     ok((await st(page)).battle.misses === 1, label + ' a wrong command counts as a miss');
   }
   await shot(page, `battle-${tag}`);
@@ -631,6 +632,128 @@ async function resume(browser, level) {
   await ctx.close();
 }
 
+// The run history: growth on the result screen, the 記録の間, migration
+// from the old best-only save, the cap, and the weakness panel.
+async function records(browser) {
+  const L = '[records]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('request', (r) => { if (!r.url().startsWith('file://')) errors.push('network request: ' + r.url()); });
+  page.on('dialog', (d) => d.accept());
+  await page.goto(PAGE);
+  ok(await page.$eval('#btn-records', (b) => b.hidden), L + ' no 記録の間 button before any run');
+  await page.click('#btn-arena');
+  const modes = await page.$$eval('.course-mode', (els) => els.map((e) => e.textContent));
+  ok(modes.join('|') === '手ならし|おすすめ ★|真剣勝負', L + ' the three modes are named (' + modes.join('|') + ')');
+  ok(await page.$$eval('.course-mode.rec', (els) => els.length === 1 && !!els[0].closest('[data-course="normal"]')), L + ' only the normal course is recommended');
+  ok(/目標 36秒/.test(await page.$eval('[data-course="easy"] .course-best', (e) => e.textContent)), L + ' the easy card shows its target time');
+
+  // Run 1, with one deliberate miss.
+  await page.click('[data-course="easy"]');
+  await page.waitForFunction(() => { const b = window.tmuxDa.state().battle; return b && b.phase === 'fight'; }, null, { timeout: 5000 });
+  // An unbound key: a miss that leaves the board as it was.
+  await page.keyboard.press('Control+b'); await page.keyboard.press('Y');
+  ok((await st(page)).battle.misses === 1, L + ' an unbound key counts as a miss');
+  await fight(page, 'Control+b', 'C-b', L);
+  await page.waitForFunction(() => document.body.dataset.screen === 'arena' && !document.querySelector('#arena-result').hidden, null, { timeout: 4000 });
+  let r = (await st(page)).result;
+  ok(r.count === 1 && r.prev === null && r.record === true, L + ' first run: count 1, no previous, a record');
+  ok(/出発点/.test(await page.$eval('#arena-result .dq-log', (e) => e.textContent)), L + ' first run says it is the starting point');
+  let db = await page.evaluate(() => window.tmuxDa.records());
+  const run = db.runs[0];
+  ok(db.schema === 2 && db.runs.length === 1 && run.id && run.at && run.rank && run.course === 'easy', L + ' the run is stored with id, time and rank');
+  ok(run.qs.length === 15 && run.qs.every((q) => q.to === 1 || q.s > 0), L + ' every question has its seconds');
+  ok(run.qs.some((q) => q.m >= 1), L + ' the deliberate miss is on its question');
+
+  // Run 2, from the result screen.
+  await page.click('#arena-result [data-course="easy"]');
+  await fight(page, 'Control+b', 'C-b', L);
+  await page.waitForFunction(() => document.body.dataset.screen === 'arena' && !document.querySelector('#arena-result').hidden, null, { timeout: 4000 });
+  r = (await st(page)).result;
+  ok(r.count === 2 && typeof r.prev === 'number' && Math.abs(r.delta - (r.time - r.prev)) < 0.05, L + ' second run compares with the first (' + (r.delta || 0).toFixed(1) + 's)');
+  ok(/前回より|新記録/.test(await page.$eval('#arena-result .dq-log', (e) => e.textContent)), L + ' the log says how it went against last time');
+  ok(await page.$$eval('#arena-result .spark-bars i', (e) => e.length) === 2, L + ' the result shows a two-bar trend');
+  await shot(page, 'result2-records');
+
+  // The 記録の間 from the result.
+  await page.click('#arena-result [data-records]');
+  ok((await st(page)).screen === 'records' && (await st(page)).recCourse === 'easy', L + ' 記録を見る opens the easy history');
+  ok(await page.$$eval('#rec-chart .bar', (e) => e.length) === 2, L + ' the chart has a bar per run');
+  ok(await page.$$eval('#rec-chart .bar.rec', (e) => e.length) >= 1, L + ' record runs are marked on the chart');
+  ok(await page.$$eval('.rec-table tbody tr', (e) => e.length) === 2, L + ' the table lists both runs');
+  ok(await page.$$eval('.weak-list li', (e) => e.length) >= 1, L + ' two runs are enough for the weakness panel');
+  await shot(page, 'records-desktop');
+  await page.click('[data-rec-course="hard"]');
+  ok(/まだない/.test(await page.$eval('#records-body', (e) => e.textContent)), L + ' a course with no runs says so');
+  await page.click('#btn-records-back');
+  ok((await st(page)).screen === 'arena', L + ' 戻る goes back to the arena');
+
+  // After a reload, from the title.
+  await page.reload();
+  ok((await page.evaluate(() => window.tmuxDa.records())).runs.length === 2, L + ' runs survive a reload');
+  ok(/通算 2 戦/.test(await page.$eval('#btn-records', (b) => b.hidden ? '' : b.textContent)), L + ' the title offers the 記録の間 with the count');
+  await page.click('#btn-records');
+  ok((await st(page)).screen === 'records', L + ' the title button opens the 記録の間');
+  await page.click('#btn-records-back');
+  ok((await st(page)).screen === 'title', L + ' 戻る goes back to the title');
+
+  // The story's "記録を消す" keeps the arena history.
+  await page.evaluate(() => { const d = JSON.parse(localStorage.getItem('tmux-da')); d.level = 3; localStorage.setItem('tmux-da', JSON.stringify(d)); });
+  await page.reload();
+  await page.click('#btn-start');
+  await dismissBrief(page);
+  ok((await page.evaluate(() => window.tmuxDa.records())).runs.length === 2, L + ' restarting the story keeps the runs');
+
+  // Clearing the arena from the 記録の間.
+  await page.goto(PAGE);
+  await page.click('#btn-records');
+  await page.click('#btn-records-clear');
+  db = await page.evaluate(() => window.tmuxDa.records());
+  ok(db.runs.length === 0 && Object.keys(db.arena).length === 0, L + ' 闘技場の記録を消す empties the history');
+  ok(errors.length === 0, L + ' no page errors and no network requests' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+
+  // Migration from a best-only save.
+  const ctx2 = await browser.newContext({ viewport: PHONE, reducedMotion: 'reduce' });
+  const p2 = await ctx2.newPage();
+  await p2.goto(PAGE);
+  await p2.evaluate(() => localStorage.setItem('tmux-da', JSON.stringify({ prefix: 'C-b', arena: { 'tmux:easy': { time: 30.5, misses: 1, date: '2026-01-01' } } })));
+  await p2.reload();
+  db = await p2.evaluate(() => window.tmuxDa.records());
+  ok(db.schema === 2 && db.runs.length === 1 && db.runs[0].legacy === true && db.runs[0].time === 30.5, L + ' an old best becomes a legacy run');
+  await p2.click('#btn-arena');
+  ok(/30\.5秒/.test(await p2.$eval('[data-course="easy"] .course-best', (e) => e.textContent)), L + ' the old best still shows on the card');
+
+  // The cap, and the weakness ranking, through the module directly.
+  const capped = await p2.evaluate(() => {
+    const runs = [];
+    for (let i = 0; i < 150; i++) runs.push({ id: 'r' + i, course: 'easy', ver: 1, at: '2026-02-01T00:00:00Z', time: 40 - i * 0.01, misses: 0, timeouts: 0, n: 15, rank: '村人', rec: i < 5, qs: [] });
+    localStorage.setItem('tmux-da', JSON.stringify({ schema: 2, arena: { 'tmux:easy': { time: 38.5 } }, runs }));
+    ADV.records.add({ course: 'easy', time: 50, raw: 50, misses: 0, timeouts: 0, keys: 15, n: 15, qs: [] });
+    const left = ADV.records.load().runs.filter((x) => x.course === 'easy');
+    return { n: left.length, recs: left.filter((x) => x.rec).length };
+  });
+  ok(capped.n <= 100 && capped.recs === 5, L + ' the history is capped at 100 per course and keeps record runs (' + capped.n + ', ' + capped.recs + ' records)');
+  await p2.evaluate(() => {
+    const qs = (slow) => ['focus', 'resize', 'swap', 'copy_top', 'rename'].map((t) => ({ t, s: t === 'copy_top' ? slow : 1.5, m: 0 }));
+    const runs = [1, 2, 3].map((i) => ({ id: 'w' + i, course: 'normal', ver: 1, at: '2026-03-0' + i + 'T00:00:00Z', time: 60 - i, misses: 0, timeouts: 0, n: 20, rank: '戦士', rec: i === 3, qs: qs(9) }));
+    localStorage.setItem('tmux-da', JSON.stringify({ schema: 2, arena: { 'tmux:normal': { time: 57 } }, runs }));
+  });
+  ok(await p2.evaluate(() => ADV.records.weakness('normal', 10).weak[0].type) === 'copy_top', L + ' the slowest question type comes first in the weakness list');
+  await p2.goto(PAGE);
+  await p2.click('#btn-records');
+  ok((await st(p2)).recCourse === 'normal', L + ' the 記録の間 opens on the course played last');
+  ok(/古文書/.test(await p2.$eval('.weak-list li', (e) => e.textContent)), L + ' the weakness panel names the copy-mode question first');
+  ok(/−\d/.test(await p2.$eval('.rec-log', (e) => e.textContent)), L + ' the headline shows how much faster the best is than the first run');
+  const sw = await p2.evaluate(() => document.documentElement.scrollWidth);
+  ok(sw <= PHONE.width, L + ' no horizontal page scroll on a phone (' + sw + 'px)');
+  await shot(p2, 'records-phone');
+  ok(await p2.evaluate(() => ADV.levels.rankFor(4.0, 2) === '勇者' && ADV.levels.rankFor(4.0) === '見習い剣士'), L + ' the hard course scales the rank thresholds');
+  await ctx2.close();
+}
+
 const browser = await chromium.launch();
 try {
   await play(browser, { prefixOpt: 'C-b', viewport: DESKTOP, scheme: 'dark', tag: 'desktop-dark' });
@@ -643,6 +766,7 @@ try {
   await mpRuns(browser);
   await lineEditing(browser);
   await persistence(browser);
+  await records(browser);
   await resume(browser, 6);
   await resume(browser, 16);
 } finally {
