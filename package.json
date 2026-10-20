@@ -1,0 +1,18 @@
+{
+  "name": "tmux-da",
+  "private": true,
+  "description": "tmux からくり屋敷: tests and server tooling (the game itself needs no build)",
+  "type": "module",
+  "scripts": {
+    "test": "scripts/test.sh",
+    "test:unit": "node --test 'web/test/unit/*.test.mjs' 'server/test/*.test.mjs'",
+    "test:game": "node web/test/playthrough.mjs",
+    "test:online": "scripts/test.sh online",
+    "deploy:server": "cd server && wrangler deploy"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1",
+    "wrangler": "^4.151.3"
+  },
+  "engines": { "node": ">=22.13" }
+}

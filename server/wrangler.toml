@@ -1,0 +1,8 @@
+name = "tmux-da-api"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tmux-da"
+database_id = "c7d64a60-2208-42a7-926f-94b276778e58"

@@ -4,3 +4,4 @@ shots/
 *.log
 server/.wrangler/
 server/node_modules/
+node_modules/
