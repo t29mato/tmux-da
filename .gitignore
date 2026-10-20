@@ -2,3 +2,5 @@
 node_modules/
 shots/
 *.log
+server/.wrangler/
+server/node_modules/

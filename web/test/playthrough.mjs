@@ -291,22 +291,33 @@ async function noSkip(browser) {
   await page.clock.runFor(3000);
   await waitPlay(page);
   const first = await st(page);
-  ok(first.run.stage === 0 && !(await page.$('#sashizu kbd.next')), L + ' within the 目安 no key is lit');
-  await page.clock.runFor(12500);
-  let s = await st(page);
-  ok(s.run.i === 0 && s.run.stage === 1, L + ' past 12 秒 the question is still there and the 行灯 is lit');
-  ok(await page.$$eval('#sashizu kbd.next', (e) => e.length) >= 1, L + ' the keys to press light up');
-  ok(/超過 \+\d/.test(await page.$eval('#sashizu .andon-over', (e) => e.textContent)), L + ' the overrun counts up');
-  ok(!(await page.$('#sashizu .shinan')), L + ' no 指南 yet');
-  await shot(page, 'andon');
-  await page.clock.runFor(6500);
-  s = await st(page);
-  ok(s.run.i === 0 && s.run.stage === 2, L + ' at 1.5 times the 目安 the question is still there');
-  ok(await page.$$eval('#sashizu .shinan li', (e) => e.length) >= 1, L + ' the 指南 lists the steps');
+  ok(first.run.stage === 0, L + ' the question starts within its 目安');
+  ok(await page.$$eval('#sashizu .shinan li', (e) => e.length) >= 1, L + ' the 指南 is on screen from the start');
   ok(/合図|押す/.test(await page.$eval('#sashizu .shinan', (e) => e.textContent)), L + ' the 指南 says which key');
+  ok(await page.$$eval('#sashizu kbd.next', (e) => e.length) >= 1, L + ' the keys to press are lit from the start');
   await shot(page, 'shinan');
+  // Leaving the tab pauses: the clock stops and the question is hidden.
+  await page.clock.runFor(2000);
+  const before = (await st(page)).run;
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  ok((await st(page)).run.phase === 'pause', L + ' leaving the window pauses the run');
+  ok(await page.$eval('#pause', (e) => !e.hidden), L + ' the pause screen shows');
+  ok(!(await page.$('#sashizu .shinan')), L + ' the question is hidden while paused');
+  const shown = await page.$eval('#playbar .pb-time span', (e) => e.textContent);
+  await page.clock.runFor(30000);
+  ok(await page.$eval('#playbar .pb-time span', (e) => e.textContent) === shown && (await st(page)).run.stage === 0, L + ' the clock does not run while paused (' + shown + ')');
+  await shot(page, 'pause');
+  await page.keyboard.press('Space');
+  ok((await st(page)).run.phase === 'play' && (await st(page)).run.i === before.i, L + ' a key resumes on the same question');
+  await page.clock.runFor(10500);
+  let s = await st(page);
+  ok(s.run.i === 0 && s.run.stage === 1, L + ' past 12 秒 of play the question is still there and the 行灯 is lit');
+  ok(/目安を過ぎた/.test(await page.$eval('#sashizu .andon-over', (e) => e.textContent)), L + ' the panel says the 目安 is past');
+  ok(await page.$eval('#sashizu kbd.next', (e) => getComputedStyle(e).animationName) === 'none', L + ' the lit keys stay still');
+  await shot(page, 'andon');
   await page.clock.runFor(60000);
-  ok((await st(page)).run.i === 0, L + ' a minute later it is still the same question');
+  s = await st(page);
+  ok(s.run.i === 0 && s.run.stage === 1, L + ' a minute later it is still the same question');
   // Prefix pressed: the first step is ticked off.
   if (s.run.next && s.run.next.pfx) {
     await page.keyboard.press('Control+b');
@@ -324,11 +335,11 @@ async function noSkip(browser) {
   }
   await waitResult(page, L);
   const r = (await st(page)).result;
-  ok(r.overs >= 1 && r.guides >= 1, L + ' the result counts 灯り and 指南 (' + r.overs + ', ' + r.guides + ')');
+  ok(r.overs >= 1, L + ' the result counts 灯り (' + r.overs + ')');
   ok(/灯り/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' the 絵巻 names the slow question');
   const db = await page.evaluate(() => window.tmuxDa.records());
   const q = db.runs[db.runs.length - 1].qs[0];
-  ok(q.o === 1 && q.g === 1 && q.s > 18, L + ' the first question is stored with its overrun (' + q.s + 's)');
+  ok(q.o === 1 && q.s > 12, L + ' the first question is stored with its overrun (' + q.s + 's)');
   ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await ctx.close();
 }
