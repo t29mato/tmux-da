@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>案B tmux からくり屋敷 — モック</title>
+<style>
+  :root {
+    --mincho: "Hiragino Mincho ProN", "Yu Mincho", YuMincho, "Noto Serif CJK JP", "Noto Serif JP", serif;
+    --sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK JP", monospace;
+    --night: #121a2b; --night-2: #1a2438; --night-3: #243049; --ai: #2b4a7a;
+    --washi: #f3eadb; --washi-2: #e9dfca; --wood: #8a6a3a; --wood-d: #5a4322; --sumi: #2b2622; --sumi-dim: #6f6558;
+    --andon: #f0a33a; --andon-2: #ffd27a; --shu: #b9322a; --line: #cdbf9f; --moss: #5d7a4a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #d9d4ca; font-family: var(--sans); color: var(--sumi); }
+  .page { width: 1280px; margin: 0 auto; padding: 24px 0 60px; }
+  .cap { font: 600 13px/1 var(--sans); color: #4a4540; margin: 28px 0 10px; letter-spacing: .08em; display: flex; align-items: center; gap: 10px; }
+  .cap b { background: var(--ai); color: #fff; border-radius: 999px; padding: 6px 12px; font-weight: 700; }
+  .titles { display: flex; gap: 10px; align-items: center; margin: 0 0 10px; font-size: 13px; color: #4a4540; }
+  .titles span { border: 1px solid #9a948a; border-radius: 999px; padding: 4px 12px; font-family: var(--mincho); background: #efeae0; }
+  .titles span.rec { background: var(--ai); color: #fff; border-color: var(--ai); }
+  .screen { width: 1280px; position: relative; overflow: hidden; box-shadow: 0 14px 40px rgba(0,0,0,.3); border-radius: 6px; }
+
+  /* 夜の屋敷 */
+  .night { background: radial-gradient(1200px 500px at 70% 100%, #1f2b44 0%, var(--night) 60%); }
+  .shoji { display: grid; grid-template-columns: repeat(6, 1fr); grid-template-rows: repeat(5, 1fr); gap: 5px; background: var(--wood-d); padding: 5px; border: 10px solid var(--wood-d); border-radius: 3px; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+  .shoji i { display: block; background: #ece2cc; opacity: .35; }
+  .shoji i.lit { background: var(--andon-2); opacity: 1; box-shadow: 0 0 24px rgba(240,163,58,.6); }
+  .shoji i.warm { background: #f7dca6; opacity: .75; }
+
+  /* ---- タイトル ---- */
+  .title { height: 740px; padding: 44px 56px 36px; display: grid; grid-template-columns: 1fr 560px; gap: 56px; align-items: start; color: var(--washi); position: relative; }
+  .facade { position: absolute; left: 56px; bottom: 0; width: 600px; height: 118px; display: grid; grid-template-columns: repeat(10, 1fr); grid-template-rows: repeat(2, 1fr); gap: 6px; padding: 6px; background: var(--wood-d); border: 8px solid var(--wood-d); border-bottom: 0; border-radius: 4px 4px 0 0; box-shadow: 0 -10px 40px rgba(240,163,58,.15); }
+  .facade i { background: #ece2cc; opacity: .3; }
+  .facade i.lit { background: var(--andon-2); opacity: 1; box-shadow: 0 0 22px rgba(240,163,58,.7); }
+  .facade i.warm { background: #f7dca6; opacity: .7; }
+  .hero .eyebrow { font-family: var(--mincho); font-size: 16px; letter-spacing: .25em; color: var(--andon-2); margin: 0; }
+  .hero h1 { margin: 16px 0 0; font-family: var(--mincho); font-size: 84px; line-height: 1.05; font-weight: 700; letter-spacing: .04em; color: #fff; }
+  .hero h1 .en { display: block; font-size: 36px; letter-spacing: .12em; color: var(--andon-2); font-weight: 500; }
+  .hero p.lead { font-size: 16px; line-height: 2; margin: 22px 0 0; color: #d8dde8; max-width: 560px; }
+  .hero p.lead b { color: #fff; font-weight: 600; }
+  .cta { display: flex; gap: 14px; margin-top: 30px; align-items: center; flex-wrap: wrap; }
+  .btn { font-family: var(--mincho); font-size: 20px; padding: 16px 28px; border-radius: 3px; border: 1px solid var(--wood); background: var(--washi); color: var(--sumi); letter-spacing: .1em; }
+  .btn.primary { background: var(--andon); border-color: #b8741a; color: #2b1a05; box-shadow: 0 0 26px rgba(240,163,58,.45); }
+  .btn.ghost { background: transparent; color: var(--washi); border-color: rgba(243,234,219,.6); }
+  .btn small { display: block; font-size: 12px; font-family: var(--sans); letter-spacing: .1em; opacity: .8; margin-top: 4px; }
+  .setting { margin-top: 24px; font-size: 13px; color: #b9c0cf; display: flex; align-items: center; gap: 12px; font-family: var(--mono); }
+  .seg { display: inline-flex; border: 1px solid rgba(243,234,219,.5); border-radius: 3px; overflow: hidden; }
+  .seg span { padding: 6px 12px; font-size: 12px; }
+  .seg span.on { background: var(--washi); color: var(--sumi); }
+  .fine { font-size: 12px; color: #9aa3b6; margin-top: 22px; }
+  /* 見取り図（コース） */
+  .plan { background: var(--washi); color: var(--sumi); border-radius: 3px; padding: 20px 22px 18px; box-shadow: 0 16px 40px rgba(0,0,0,.5); position: relative; }
+  .plan::before { content: "見取り図 ― 屋敷を選ぶ"; position: absolute; top: -14px; left: 20px; background: var(--ai); color: #fff; font-family: var(--mincho); font-size: 13px; padding: 5px 14px; letter-spacing: .25em; }
+  .wing { display: grid; grid-template-columns: 96px 1fr 128px; gap: 16px; align-items: center; padding: 14px 8px; border-bottom: 1px dashed var(--line); }
+  .wing:last-of-type { border-bottom: 0; }
+  .mini { display: grid; gap: 2px; background: var(--wood); padding: 2px; border: 2px solid var(--wood); aspect-ratio: 4/3; }
+  .mini i { background: #faf4e6; }
+  .mini i.lit { background: var(--andon-2); }
+  .wing .nm { font-family: var(--mincho); font-size: 22px; font-weight: 700; display: flex; gap: 10px; align-items: center; white-space: nowrap; }
+  .wing .nm .n { font-size: 13px; font-family: var(--mono); color: var(--sumi-dim); font-weight: 400; }
+  .wing .nm .rec { font-size: 11px; background: var(--shu); color: #fff; padding: 2px 8px; border-radius: 999px; font-family: var(--sans); font-weight: 600; }
+  .wing .ds { font-size: 12.5px; color: var(--sumi-dim); margin-top: 4px; line-height: 1.6; }
+  .wing .bt { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--sumi-dim); line-height: 1.6; white-space: nowrap; }
+  .wing .bt b { display: block; font-family: var(--mincho); font-size: 22px; color: var(--sumi); }
+  .wing.hot { background: #fff6dd; }
+  .plan .note { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; font-size: 12px; color: var(--sumi-dim); line-height: 1.7; }
+  .plan .shoji-wrap { position: absolute; right: -40px; top: -60px; width: 150px; transform: rotate(6deg); opacity: .95; }
+
+  /* ---- プレイ中 ---- */
+  .play { height: 820px; display: grid; grid-template-rows: 60px 1fr; background: var(--night-2); }
+  .play .bar { display: flex; align-items: center; gap: 22px; padding: 0 26px; color: #d8dde8; border-bottom: 1px solid #33405c; }
+  .play .bar .logo { font-family: var(--mincho); font-size: 20px; color: #fff; letter-spacing: .08em; }
+  .play .bar .logo em { font-style: normal; color: var(--andon-2); font-family: var(--mono); font-size: 16px; margin-right: 8px; letter-spacing: .05em; }
+  .play .bar .crs { font-family: var(--mincho); font-size: 15px; }
+  .play .bar .crs b { color: var(--andon-2); }
+  .play .bar .sp { flex: 1; }
+  .play .bar .time { font-family: var(--mono); font-size: 30px; color: #fff; }
+  .play .bar .time small { font-size: 13px; color: #b9c0cf; margin-left: 4px; }
+  .play .bar .pen { font-family: var(--mono); font-size: 13px; color: #ff9d8f; }
+  .play-body { display: grid; grid-template-columns: 330px 1fr; gap: 24px; padding: 22px 26px 20px; }
+  /* 指図 */
+  .sashizu { background: var(--washi); border-radius: 3px; padding: 18px 20px 16px; box-shadow: 0 10px 26px rgba(0,0,0,.45); position: relative; }
+  .sashizu .lab { font-family: var(--mincho); font-size: 12px; letter-spacing: .4em; color: var(--sumi-dim); border-bottom: 1px solid var(--line); padding-bottom: 8px; display: flex; justify-content: space-between; }
+  .sashizu .lab b { font-family: var(--mono); letter-spacing: 0; color: var(--sumi-dim); font-weight: 400; }
+  .sashizu .q { font-family: var(--mincho); font-size: 27px; font-weight: 700; line-height: 1.5; margin: 12px 0 14px; }
+  .keys { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  kbd { font-family: var(--mono); font-size: 14px; padding: 5px 9px; border: 1px solid #9b8a6a; border-bottom-width: 3px; border-radius: 4px; background: #fff; color: var(--sumi); }
+  kbd.pfx { background: var(--ai); color: #fff; border-color: #16283f; }
+  kbd.done { opacity: .45; }
+  kbd.next { border-color: var(--andon); box-shadow: 0 0 0 3px rgba(240,163,58,.45); background: #fff3d6; }
+  .keys .arr { color: var(--sumi-dim); }
+  .sashizu .hint { font-size: 12px; color: var(--sumi-dim); margin-top: 12px; line-height: 1.6; }
+  /* 行灯 = 目安と遅れ */
+  .andon { margin-top: 16px; border: 1px solid var(--line); border-radius: 3px; padding: 10px 12px; background: #fff8e8; }
+  .andon .l { font-size: 12px; color: var(--sumi-dim); display: flex; justify-content: space-between; align-items: center; }
+  .andon .l b { font-family: var(--mono); color: var(--shu); font-size: 15px; }
+  .gauge { height: 10px; background: #e6dcc6; border-radius: 999px; overflow: hidden; margin-top: 6px; border: 1px solid var(--line); position: relative; }
+  .gauge i { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: linear-gradient(90deg, var(--moss), #9cc27a); }
+  .gauge i.over { background: var(--shu); width: 23%; left: auto; right: 0; }
+  .shinan { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; }
+  .shinan .t { font-family: var(--mincho); font-size: 13px; color: var(--shu); letter-spacing: .2em; display: flex; align-items: center; gap: 8px; }
+  .shinan .t i { width: 14px; height: 18px; background: var(--andon); border-radius: 3px 3px 5px 5px; box-shadow: 0 0 10px rgba(240,163,58,.8); }
+  .shinan ol { margin: 8px 0 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .shinan li { display: flex; align-items: center; gap: 8px; color: var(--sumi-dim); }
+  .shinan li.now { color: var(--sumi); font-weight: 600; }
+  .shinan li .no { font-family: var(--mono); width: 16px; }
+  .toast { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .chip { font-size: 12.5px; padding: 7px 12px; border-radius: 3px; background: var(--washi); border: 1px solid var(--line); width: fit-content; display: inline-flex; gap: 8px; align-items: center; }
+  .chip.good { border-color: var(--moss); color: var(--moss); font-weight: 600; }
+  .chip.miss { border-color: var(--shu); color: var(--shu); font-weight: 600; }
+  .chip.note { color: var(--sumi-dim); }
+  /* 屋敷 = tmux */
+  .yashiki { background: linear-gradient(180deg, #6b4f2a, #553c1f); border: 8px solid var(--wood-d); border-radius: 4px; padding: 12px; box-shadow: 0 16px 36px rgba(0,0,0,.55); display: grid; grid-template-rows: auto 1fr auto; gap: 8px; }
+  .yashiki .mh { display: flex; justify-content: space-between; font-family: var(--mincho); font-size: 12px; color: #e9dcc0; letter-spacing: .2em; }
+  .term { background: var(--washi); font-family: var(--mono); font-size: 14px; line-height: 1.45; height: 548px; display: grid; grid-template-columns: 1.3fr 1fr; border: 3px double var(--wood); position: relative;
+    background-image: repeating-linear-gradient(90deg, rgba(120,90,40,.06) 0 1px, transparent 1px 28px); }
+  .pane { position: relative; padding: 26px 14px 10px; color: #3b3328; overflow: hidden; }
+  .pane + .pane { border-left: 3px double var(--wood); }
+  .col { display: grid; grid-template-rows: 1fr 1fr; }
+  .col .pane + .pane { border-left: 0; border-top: 3px double var(--wood); }
+  .pane .pt { position: absolute; top: 4px; left: 10px; font-family: var(--mincho); font-size: 13px; color: var(--sumi-dim); background: #fff; border: 1px solid var(--line); padding: 1px 8px; }
+  .pane.on { background: radial-gradient(400px 260px at 50% 60%, #fff3d2, var(--washi)); box-shadow: inset 0 0 0 2px var(--andon); }
+  .pane.on .pt { color: #2b1a05; border-color: var(--andon); background: #fff3d2; }
+  .pane .dim { color: #9a8f7c; }
+  .pane .room { font-family: var(--mincho); font-size: 30px; font-weight: 700; margin-top: 34px; text-align: center; line-height: 1.3; }
+  .pane .room small { display: block; font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--sumi-dim); margin-top: 6px; }
+  .pane .scroll { width: 120px; height: 12px; margin: 14px auto 0; background: linear-gradient(90deg, var(--wood) 0 8px, #fff 8px calc(100% - 8px), var(--wood) calc(100% - 8px)); border-radius: 6px; }
+  .status { background: var(--ai); color: #e8f0ff; font-family: var(--mono); font-size: 13px; padding: 6px 10px; display: flex; gap: 14px; align-items: center; border-radius: 2px; }
+  .status .tab { padding: 1px 6px; }
+  .status .tab.on { background: var(--andon-2); color: var(--sumi); border-radius: 2px; }
+  .status .sp { flex: 1; }
+
+  /* ---- 結果: 絵巻 ---- */
+  .result { height: 820px; display: grid; place-items: center; background: var(--night-2); }
+  .emaki { display: grid; grid-template-columns: 26px 1fr 26px; width: 760px; filter: drop-shadow(0 18px 36px rgba(0,0,0,.55)); }
+  .emaki .rod { background: linear-gradient(90deg, #3b2a14, #8a6a3a, #3b2a14); border-radius: 8px; margin: -16px 0; }
+  .emaki .body { background: var(--washi); padding: 30px 40px 28px; position: relative;
+    background-image: linear-gradient(90deg, rgba(120,90,40,.05) 0 1px, transparent 1px 40px); }
+  .emaki .hd { font-family: var(--mincho); font-size: 12px; letter-spacing: .4em; color: var(--sumi-dim); }
+  .emaki h2 { font-family: var(--mincho); font-size: 42px; margin: 6px 0 2px; letter-spacing: .04em; }
+  .emaki .sub { font-family: var(--mincho); font-size: 14px; color: var(--sumi-dim); }
+  .emaki .row { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: end; margin-top: 14px; }
+  .emaki .tm { font-family: var(--mono); font-size: 76px; line-height: 1; }
+  .emaki .tm small { font-size: 22px; margin-left: 6px; }
+  .emaki .verdict { font-family: var(--mincho); font-size: 20px; line-height: 1.5; padding-bottom: 6px; }
+  .emaki .verdict b { color: var(--shu); font-size: 26px; }
+  .emaki .verdict .tip { display: block; font-size: 13px; font-family: var(--sans); color: var(--sumi-dim); margin-top: 4px; }
+  .emaki .rank { display: flex; align-items: center; gap: 14px; margin: 16px 0 6px; font-family: var(--mincho); font-size: 17px; }
+  .hanko { width: 64px; height: 64px; border: 3px solid var(--shu); border-radius: 4px; color: var(--shu); font-family: var(--mincho); font-weight: 700; font-size: 18px; display: grid; place-items: center; transform: rotate(-8deg); line-height: 1.1; text-align: center; opacity: .9; }
+  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0 30px; margin-top: 12px; border-top: 1px solid var(--wood); border-bottom: 1px solid var(--wood); padding: 10px 0; }
+  .facts div { display: flex; justify-content: space-between; font-size: 14px; padding: 4px 0; font-family: var(--mono); }
+  .facts div span:first-child { font-family: var(--sans); color: var(--sumi-dim); }
+  .spark { display: flex; align-items: flex-end; gap: 5px; height: 44px; margin: 14px 0 0; padding: 0 4px; }
+  .spark i { flex: 1; background: #cdbd9a; border-radius: 2px 2px 0 0; }
+  .spark i.rec { background: var(--shu); }
+  .spark i.now { background: var(--ai); }
+  .spark-l { font-size: 12px; color: var(--sumi-dim); display: flex; justify-content: space-between; margin-top: 4px; }
+  .emaki .cta { margin-top: 20px; }
+  .emaki .btn { font-size: 17px; padding: 12px 22px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<div class="cap"><b>案B からくり屋敷</b> ① タイトル画面 — 夜の屋敷。障子の明かりと見取り図</div>
+<div class="titles">題名候補: <span class="rec">tmux からくり屋敷（推奨）</span><span>tmux屋敷</span><span>からくり tmux</span></div>
+<section class="screen title night">
+  <div class="hero">
+    <p class="eyebrow">屋敷を出ても、仕掛けはそのまま。</p>
+    <h1><span class="en">tmux</span>からくり屋敷</h1>
+    <p class="lead">襖が勝手に立ち、部屋が回り、壁が開いて大広間になる。<br>指図どおりに<b>襖を立て</b>、<b>間を渡り</b>、<b>棟を建て</b>、<b>巻物を読む</b>。<br>奥の間に辿り着くまでの速さを競う。押すキーはいつも指図に書いてある。</p>
+    <div class="setting">合図（prefix）<span class="seg"><span class="on">Ctrl+b</span><span>Ctrl+a</span></span></div>
+    <div class="cta">
+      <button class="btn primary">屋敷に入る<small>八間屋敷 から</small></button>
+      <button class="btn ghost">絵巻<small>記録を見る</small></button>
+    </div>
+    <p class="fine">はじめての人は三間屋敷へ。1 仕掛け 1 キーで、指図を見ながら解ける。通信はしない。記録はこのブラウザの中だけ。</p>
+  </div>
+  <div class="facade" aria-hidden="true"><i></i><i class="warm"></i><i></i><i></i><i class="lit"></i><i></i><i></i><i class="warm"></i><i></i><i></i><i></i><i></i><i class="warm"></i><i></i><i></i><i></i><i class="lit"></i><i></i><i></i><i class="warm"></i></div>
+  <aside class="plan">
+    <div class="wing">
+      <div class="mini" style="grid-template-columns:2fr 1fr"><i class="lit"></i><i></i><i style="grid-column:1/3"></i></div>
+      <div><div class="nm">三間屋敷 <span class="n">15 仕掛け</span></div><div class="ds">目安 12 秒／仕掛け。襖を立てる・間を渡る・大広間・間を閉じる・棟を渡る。</div></div>
+      <div class="bt">自己ベスト<b>28.4秒</b>五回平均 30.1 ・ 12 回</div>
+    </div>
+    <div class="wing hot">
+      <div class="mini" style="grid-template-columns:repeat(4,1fr)"><i></i><i class="lit"></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div><div class="nm">八間屋敷 <span class="n">20 仕掛け</span><span class="rec">おすすめ</span></div><div class="ds">目安 14 秒／仕掛け。襖をずらす・間に名札・部屋が回る・棟を閉める・巻物も混ざる。</div></div>
+      <div class="bt">自己ベスト<b>48.2秒</b>五回平均 51.0 ・ 27 回</div>
+    </div>
+    <div class="wing">
+      <div class="mini" style="grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(4,1fr)"><i></i><i></i><i></i><i></i><i></i><i></i><i class="lit"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div><div class="nm">百間屋敷 <span class="n">16 仕掛け</span></div><div class="ds">目安 18 秒／仕掛け。1 仕掛けで 2〜3 手。考える前に手が動くか。</div></div>
+      <div class="bt">自己ベスト<b>—</b>当主の刻 77 秒</div>
+    </div>
+    <div class="note">仕掛けは毎回ちがう順で出る。合図を間違えると +2 秒。目安を過ぎても仕掛けは飛ばない。行灯がともって押すキーが光り、それでも進まなければ指南が 1 手ずつ出る。</div>
+  </aside>
+</section>
+
+<div class="cap"><b>案B からくり屋敷</b> ② プレイ中 — 左に指図と行灯、中央の屋敷が tmux（目安を過ぎて指南が出ている状態）</div>
+<section class="screen play">
+  <div class="bar">
+    <div class="logo"><em>tmux</em>からくり屋敷</div>
+    <div class="crs">八間屋敷 ・ 仕掛け <b>7 / 20</b></div>
+    <div class="crs">合図 Ctrl+b</div>
+    <div class="sp"></div>
+    <div class="pen">仕掛け違い 1（+2秒）</div>
+    <div class="time">48.2<small>秒</small></div>
+  </div>
+  <div class="play-body">
+    <div>
+      <div class="sashizu">
+        <div class="lab">指 図 <b>七 ／ 二十</b></div>
+        <div class="q">掛け軸の間へ<br>渡れ</div>
+        <div class="keys"><kbd class="pfx done">Ctrl+b</kbd><span class="arr">→</span><kbd>←</kbd><kbd class="next">→</kbd><kbd>↑</kbd><kbd>↓</kbd></div>
+        <div class="hint">Ctrl+b を押して離してから 矢印キー</div>
+        <div class="andon">
+          <div class="l"><span>目安 14 秒</span><b>超過 +3.2 秒</b></div>
+          <div class="gauge"><i></i><i class="over"></i></div>
+          <div class="shinan">
+            <div class="t"><i></i>行灯がともった ― 指南</div>
+            <ol>
+              <li><span class="no">一</span>合図 Ctrl+b を押して離す ✓</li>
+              <li class="now"><span class="no">二</span>掛け軸の間は右にある → を押す</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+      <div class="toast">
+        <span class="chip good">五連の仕掛け ・ 手際よし</span>
+        <span class="chip miss">仕掛け違い +2 秒</span>
+        <span class="chip note">遅れた仕掛けは絵巻に「灯り」と残る</span>
+      </div>
+    </div>
+    <div class="yashiki">
+      <div class="mh"><span>母屋 ― 八間屋敷</span><span>仕掛け 七</span></div>
+      <div class="term">
+        <div class="pane on"><span class="pt">茶の間</span><span class="dim">$ </span>cat chanoma.txt<br><span class="dim">囲炉裏に火が入っている</span><div class="room">茶の間<small>いまここ</small></div></div>
+        <div class="col">
+          <div class="pane"><span class="pt">掛け軸の間</span><span class="dim">$ </span>ls<br><div class="room">掛け軸の間<small>← 渡る先</small><div class="scroll"></div></div></div>
+          <div class="pane"><span class="pt">空き間</span><span class="dim">$ </span><div class="room" style="color:#9a8f7c">空き間<small>閉じるときは x → y</small></div></div>
+        </div>
+      </div>
+      <div class="status"><span>[八間]</span><span class="tab on">0:母屋*</span><span class="tab">1:離れ</span><span class="tab">2:蔵</span><span class="sp"></span><span>合図 Ctrl+b</span><span>11:31</span></div>
+    </div>
+  </div>
+</section>
+
+<div class="cap"><b>案B からくり屋敷</b> ③ 結果画面 — 絵巻。決めゼリフは「奥の間に辿り着いた」と「当主の刻」</div>
+<section class="screen result">
+  <div class="emaki">
+    <div class="rod"></div>
+    <div class="body">
+      <div class="hd">絵 巻 ・ 二十八 回 目</div>
+      <h2>奥の間に辿り着いた。</h2>
+      <div class="sub">八間屋敷 ・ 仕掛け 20 ・ 2026年10月20日</div>
+      <div class="row">
+        <div class="tm">48.2<small>秒</small></div>
+        <div class="verdict">当主の刻 62 秒を <b>13.8 秒</b> 上回った<span class="tip">★ 自己ベスト更新（49.6 → 48.2）・ 五回平均 51.0 → 50.3</span></div>
+      </div>
+      <div class="rank"><span class="hanko">から<br>くり師</span><span>称号が「屋敷守」から <b>からくり師</b> に上がった</span></div>
+      <div class="facts">
+        <div><span>1 仕掛けあたり</span><span>2.41秒</span></div>
+        <div><span>実時間</span><span>46.2秒</span></div>
+        <div><span>仕掛け違い</span><span>1（+2秒）</span></div>
+        <div><span>灯り（目安超過）</span><span>2 仕掛け ・ 指南 1</span></div>
+        <div><span>自己ベスト</span><span>48.2秒</span></div>
+        <div><span>五回平均</span><span>50.3秒</span></div>
+      </div>
+      <div class="spark"><i style="height:100%"></i><i style="height:88%"></i><i style="height:80%"></i><i style="height:84%"></i><i style="height:70%"></i><i style="height:72%"></i><i style="height:62%"></i><i style="height:64%"></i><i style="height:58%" class="rec"></i><i style="height:52%" class="now"></i></div>
+      <div class="spark-l"><span>直近 10 回 ・ 灯りが多かった仕掛け: 巻物を頭まで巻き戻す（[ → g）</span><span>■ 自己ベスト ■ 今回</span></div>
+      <div class="cta"><button class="btn primary">もう一度 屋敷へ</button><button class="btn">絵巻を開く</button></div>
+    </div>
+    <div class="rod"></div>
+  </div>
+</section>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>案C tmux 編集局 — モック</title>
+<style>
+  :root {
+    --mincho: "Hiragino Mincho ProN", "Yu Mincho", YuMincho, "Noto Serif CJK JP", "Noto Serif JP", serif;
+    --sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK JP", monospace;
+    --paper: #f4efe4; --paper-2: #ebe4d4; --ink: #15120f; --ink-2: #3a342c; --ink-dim: #6f675b; --rule: #15120f; --rule-2: #b8ad99;
+    --shu: #c8261a; --shu-2: #a41d13; --desk: #2b2622; --tan: #d9cfb6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #cfc9bd; font-family: var(--mincho); color: var(--ink); }
+  .page { width: 1280px; margin: 0 auto; padding: 24px 0 60px; }
+  .cap { font: 600 13px/1 var(--sans); color: #4a4540; margin: 28px 0 10px; letter-spacing: .08em; display: flex; align-items: center; gap: 10px; }
+  .cap b { background: var(--ink); color: #fff; border-radius: 999px; padding: 6px 12px; font-weight: 700; }
+  .titles { display: flex; gap: 10px; align-items: center; margin: 0 0 10px; font-size: 13px; color: #4a4540; font-family: var(--sans); }
+  .titles span { border: 1px solid #9a948a; border-radius: 999px; padding: 4px 12px; font-family: var(--mincho); background: #efeae0; }
+  .titles span.rec { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .screen { width: 1280px; position: relative; overflow: hidden; box-shadow: 0 14px 40px rgba(0,0,0,.25); }
+  .paper-bg { background: var(--paper); background-image: radial-gradient(rgba(0,0,0,.035) 1px, transparent 1px); background-size: 4px 4px; }
+
+  /* ---- タイトル: 一面 ---- */
+  .front { height: 790px; padding: 26px 48px 22px; display: grid; grid-template-rows: auto auto 1fr auto; }
+  .ears { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; border-bottom: 4px double var(--rule); padding-bottom: 12px; }
+  .ear { font-size: 12px; line-height: 1.7; color: var(--ink-2); border: 1px solid var(--rule); padding: 8px 12px; width: 230px; }
+  .ear b { display: block; font-size: 14px; }
+  .ear.r { justify-self: end; }
+  .masthead { text-align: center; }
+  .masthead h1 { margin: 0; font-size: 100px; line-height: 1; font-weight: 700; letter-spacing: .04em; display: flex; align-items: center; justify-content: center; gap: 14px; }
+  .masthead h1 .d { display: inline-block; background: var(--ink); color: var(--paper); padding: 4px 16px; }
+  .masthead .sub { font-size: 16px; letter-spacing: .5em; text-indent: .5em; margin-top: 8px; color: var(--ink-2); }
+  .dateline { display: flex; justify-content: space-between; font-size: 13px; border-bottom: 1px solid var(--rule); padding: 6px 2px; color: var(--ink-2); font-family: var(--sans); }
+  .front-body { display: grid; grid-template-columns: 1.25fr 1fr; gap: 0 36px; padding-top: 18px; }
+  .lead h2 { font-size: 44px; line-height: 1.3; margin: 0 0 16px; letter-spacing: .02em; }
+  .lead h2 em { font-style: normal; background: linear-gradient(transparent 60%, #f3d7a0 60%); }
+  .lead .cols { column-count: 2; column-gap: 28px; column-rule: 1px solid var(--rule-2); font-size: 15px; line-height: 1.95; text-align: justify; }
+  .lead .cols p { margin: 0 0 .6em; }
+  .cta { display: flex; gap: 12px; margin-top: 22px; flex-wrap: wrap; align-items: center; }
+  .btn { font-family: var(--mincho); font-size: 19px; padding: 14px 24px; border: 2px solid var(--ink); background: var(--paper); color: var(--ink); letter-spacing: .1em; }
+  .btn.primary { background: var(--ink); color: var(--paper); }
+  .btn.shu { border-color: var(--shu); color: var(--shu); }
+  .btn small { display: block; font-size: 11px; font-family: var(--sans); letter-spacing: .1em; opacity: .8; margin-top: 4px; }
+  .setting { font-family: var(--sans); font-size: 13px; color: var(--ink-2); margin-top: 16px; display: flex; gap: 10px; align-items: center; }
+  .seg { display: inline-flex; border: 1px solid var(--ink); }
+  .seg span { padding: 5px 12px; font-family: var(--mono); font-size: 12px; }
+  .seg span.on { background: var(--ink); color: var(--paper); }
+  .deadlines { border: 1px solid var(--rule); }
+  .deadlines .h { background: var(--ink); color: var(--paper); padding: 8px 14px; font-size: 16px; letter-spacing: .3em; display: flex; justify-content: space-between; align-items: center; }
+  .deadlines .h small { font-family: var(--sans); letter-spacing: 0; font-size: 11px; opacity: .8; }
+  .row { display: grid; grid-template-columns: 1fr 150px; gap: 10px; padding: 14px; border-bottom: 1px solid var(--rule-2); align-items: center; }
+  .row:last-of-type { border-bottom: 0; }
+  .row .nm { font-size: 24px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+  .row .nm .n { font-size: 15px; font-weight: 400; color: var(--ink-2); }
+  .row .nm .rec { font-family: var(--sans); font-size: 11px; font-weight: 700; color: var(--shu); border: 1px solid var(--shu); padding: 2px 7px; }
+  .row .ds { font-family: var(--sans); font-size: 12.5px; color: var(--ink-dim); margin-top: 5px; line-height: 1.6; }
+  .row .bt { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ink-dim); line-height: 1.6; white-space: nowrap; }
+  .row .bt b { display: block; font-family: var(--mincho); font-size: 24px; color: var(--ink); }
+  .row.hot { background: #fff9ec; }
+  .stamp { display: inline-grid; place-items: center; border: 3px solid var(--shu); color: var(--shu); font-weight: 700; transform: rotate(-8deg); padding: 2px 6px; font-size: 14px; letter-spacing: .2em; text-indent: .2em; opacity: .9; }
+  .ad { border: 1px solid var(--rule-2); margin-top: 14px; padding: 10px 14px; font-family: var(--sans); font-size: 12px; color: var(--ink-dim); line-height: 1.7; }
+  .ticker { border-top: 1px solid var(--rule); margin-top: 14px; padding-top: 10px; display: flex; gap: 28px; font-size: 13px; color: var(--ink-2); }
+  .ticker b { font-family: var(--sans); font-size: 11px; color: var(--shu); margin-right: 8px; letter-spacing: .1em; }
+
+  /* ---- プレイ中: 編集局 ---- */
+  .play { height: 820px; background: var(--desk); display: grid; grid-template-rows: 60px 1fr; }
+  .play .bar { display: flex; align-items: center; gap: 22px; padding: 0 28px; color: #e8e2d4; border-bottom: 1px solid #4a433b; font-family: var(--sans); }
+  .play .bar .logo { font-family: var(--mincho); font-size: 20px; color: #fff; letter-spacing: .08em; display: flex; align-items: center; gap: 8px; }
+  .play .bar .logo .d { background: var(--paper); color: var(--ink); padding: 0 6px; }
+  .play .bar .ed { font-size: 14px; color: #c9c1b0; }
+  .play .bar .ed b { color: #fff; font-family: var(--mincho); font-size: 17px; }
+  .play .bar .sp { flex: 1; }
+  .play .bar .time { font-family: var(--mono); font-size: 30px; color: #fff; }
+  .play .bar .time small { font-size: 13px; color: #c9c1b0; margin-left: 4px; }
+  .play .bar .pen { font-family: var(--mono); font-size: 13px; color: #ff9d8f; }
+  .play-body { display: grid; grid-template-columns: 330px 1fr; gap: 24px; padding: 22px 28px 20px; }
+  .memo { background: #fff; border: 1px solid #c9c1b0; padding: 18px 18px 16px 18px; position: relative; box-shadow: 0 8px 20px rgba(0,0,0,.4);
+    background-image: linear-gradient(90deg, transparent 0 25px, rgba(200,38,26,.18) 25px 26px, transparent 26px); }
+  .memo .clip { position: absolute; right: 16px; top: -12px; width: 44px; height: 24px; border: 3px solid #8c8477; border-bottom: 0; border-radius: 10px 10px 0 0; }
+  .memo > * { margin-left: 20px; }
+  .memo .lab { font-family: var(--sans); font-size: 11px; letter-spacing: .3em; color: var(--shu); font-weight: 700; }
+  .memo .no { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); margin-top: 8px; }
+  .memo .q { font-size: 26px; font-weight: 700; line-height: 1.5; margin-top: 4px; margin-bottom: 14px; }
+  .keys { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  kbd { font-family: var(--mono); font-size: 14px; padding: 5px 9px; border: 1px solid #8c8477; border-bottom-width: 3px; border-radius: 3px; background: var(--paper); color: var(--ink); }
+  kbd.pfx { background: var(--ink); color: var(--paper); border-color: #000; }
+  kbd.done { opacity: .45; }
+  kbd.next { border-color: var(--shu); box-shadow: 0 0 0 3px rgba(200,38,26,.3); background: #fff; }
+  .keys .arr { color: var(--ink-dim); }
+  .memo .hint { font-family: var(--sans); font-size: 12px; color: var(--ink-dim); margin-top: 12px; line-height: 1.6; }
+  .deadline { margin-top: 16px; }
+  .deadline .l { font-family: var(--sans); font-size: 12px; color: var(--ink-dim); display: flex; justify-content: space-between; align-items: center; }
+  .deadline .l b { color: var(--shu); font-family: var(--mono); font-size: 15px; }
+  .gauge { height: 10px; background: #e8e2d4; margin-top: 4px; border: 1px solid #c9c1b0; position: relative; }
+  .gauge i { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: var(--ink); }
+  .gauge i.over { background: var(--shu); width: 23%; left: auto; right: 0; }
+  .akaji { margin-top: 10px; border-top: 1px dashed #c9c1b0; padding-top: 10px; }
+  .akaji .t { font-family: var(--sans); font-size: 12px; color: var(--shu); font-weight: 700; letter-spacing: .15em; display: flex; align-items: center; gap: 8px; }
+  .akaji .t .st { border: 2px solid var(--shu); padding: 0 5px; transform: rotate(-6deg); font-family: var(--mincho); }
+  .akaji ol { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-family: var(--sans); font-size: 13px; }
+  .akaji li { display: flex; align-items: center; gap: 8px; color: var(--ink-dim); }
+  .akaji li.now { color: var(--shu); font-weight: 700; }
+  .akaji li .no { font-family: var(--mono); width: 16px; }
+  .toast { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .chip { font-family: var(--sans); font-size: 12.5px; padding: 7px 12px; background: var(--paper); border: 1px solid #c9c1b0; width: fit-content; display: inline-flex; gap: 8px; align-items: center; }
+  .chip.good { font-weight: 700; }
+  .chip.miss { color: var(--shu); font-weight: 700; border-color: var(--shu); }
+  .chip.note { color: var(--ink-dim); }
+  .chip .st { display: inline-block; border: 2px solid var(--shu); color: var(--shu); font-family: var(--mincho); font-weight: 700; padding: 0 5px; transform: rotate(-6deg); font-size: 12px; }
+  .galley { background: var(--paper); padding: 26px 28px 20px; position: relative; box-shadow: 0 12px 26px rgba(0,0,0,.5); display: grid; grid-template-rows: auto 1fr auto; gap: 8px; }
+  .galley::before, .galley::after { content: ""; position: absolute; width: 18px; height: 18px; border: 1px solid var(--ink); }
+  .galley::before { left: 8px; top: 8px; border-right: 0; border-bottom: 0; }
+  .galley::after { right: 8px; bottom: 8px; border-left: 0; border-top: 0; }
+  .galley .ghead { display: flex; justify-content: space-between; font-family: var(--sans); font-size: 11px; color: var(--ink-dim); letter-spacing: .1em; border-bottom: 1px solid var(--ink); padding-bottom: 4px; }
+  .term { font-family: var(--mono); font-size: 14px; line-height: 1.45; height: 540px; display: grid; grid-template-columns: 1.3fr 1fr; border: 1px solid var(--ink); background: #fbf8f1; }
+  .pane { position: relative; padding: 24px 12px 10px; color: var(--ink-2); overflow: hidden; }
+  .pane + .pane { border-left: 1px solid var(--ink); }
+  .col { display: grid; grid-template-rows: 1fr 1fr; }
+  .col .pane + .pane { border-left: 0; border-top: 1px solid var(--ink); }
+  .pane .pt { position: absolute; top: 0; left: 8px; font-size: 12px; color: var(--ink-dim); background: #fbf8f1; padding: 0 6px; }
+  .pane.on { outline: 2px solid var(--shu); outline-offset: -2px; }
+  .pane.on .pt { color: var(--shu); font-weight: 700; }
+  .pane .dim { color: #9a9283; }
+  .pane .head { font-family: var(--mincho); font-size: 30px; font-weight: 700; margin-top: 34px; text-align: center; line-height: 1.3; }
+  .pane .head small { display: block; font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--ink-dim); margin-top: 6px; }
+  .pane .lines { margin-top: 10px; }
+  .pane .lines i { display: block; height: 6px; background: #d9d2c2; margin: 5px 0; width: 90%; }
+  .pane .lines i:nth-child(2n) { width: 76%; }
+  .status { background: var(--ink); color: var(--paper); font-family: var(--mono); font-size: 13px; padding: 6px 10px; display: flex; gap: 14px; align-items: center; }
+  .status .tab { padding: 1px 6px; }
+  .status .tab.on { background: var(--paper); color: var(--ink); }
+  .status .sp { flex: 1; }
+
+  /* ---- 結果: 校了 ---- */
+  .result { height: 820px; display: grid; place-items: center; background: var(--desk); }
+  .sheet { width: 680px; background: var(--paper); padding: 34px 44px 30px; position: relative; box-shadow: 0 16px 36px rgba(0,0,0,.5); }
+  .sheet .big-stamp { position: absolute; right: 36px; top: 28px; width: 120px; height: 120px; border: 4px solid var(--shu); border-radius: 50%; display: grid; place-items: center; color: var(--shu); font-size: 44px; font-weight: 700; transform: rotate(14deg); letter-spacing: .05em; opacity: .85; }
+  .sheet .big-stamp::after { content: ""; position: absolute; inset: 6px; border: 1px solid var(--shu); border-radius: 50%; }
+  .sheet .hd { font-family: var(--sans); font-size: 12px; letter-spacing: .4em; color: var(--ink-dim); }
+  .sheet h2 { font-size: 46px; margin: 4px 0 2px; line-height: 1.2; letter-spacing: .02em; }
+  .sheet .sub { font-size: 14px; color: var(--ink-2); }
+  .sheet .tm { font-family: var(--mono); font-size: 76px; line-height: 1; margin: 18px 0 0; }
+  .sheet .tm small { font-size: 22px; margin-left: 6px; }
+  .sheet .verdict { margin-top: 14px; font-size: 22px; display: flex; align-items: center; gap: 14px; }
+  .sheet .verdict b { color: var(--shu); font-size: 28px; }
+  .sheet .verdict .tip { font-family: var(--sans); font-size: 14px; color: var(--ink-dim); }
+  .sheet .rank { margin-top: 14px; font-size: 18px; display: flex; align-items: center; gap: 12px; }
+  .sheet .rank .meishi { border: 1px solid var(--ink); padding: 6px 14px; font-size: 14px; line-height: 1.4; background: #fff; white-space: nowrap; }
+  .sheet .rank .meishi b { display: block; font-size: 18px; }
+  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0 30px; margin-top: 16px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); padding: 10px 0; }
+  .facts div { display: flex; justify-content: space-between; font-size: 14px; padding: 4px 0; font-family: var(--mono); }
+  .facts div span:first-child { font-family: var(--sans); color: var(--ink-dim); }
+  .spark { display: flex; align-items: flex-end; gap: 5px; height: 44px; margin: 14px 0 0; padding: 0 4px; }
+  .spark i { flex: 1; background: #cfc6b2; }
+  .spark i.rec { background: var(--shu); }
+  .spark i.now { background: var(--ink); }
+  .spark-l { font-family: var(--sans); font-size: 12px; color: var(--ink-dim); display: flex; justify-content: space-between; margin-top: 4px; }
+  .sheet .cta { margin-top: 22px; }
+  .sheet .btn { font-size: 17px; padding: 12px 22px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<div class="cap"><b>案C 編集局</b> ① タイトル画面 — 新聞の一面。題字・段組・締切表</div>
+<div class="titles">題名候補: <span class="rec">tmux 編集局（推奨）</span><span>tmux打 編集局（「打」= 活字を打つ）</span><span>tmux 校了</span></div>
+<section class="screen front paper-bg">
+  <div class="ears">
+    <div class="ear"><b>本日の締切</b>夕刊 12 秒／本<br>朝刊 14 秒／本</div>
+    <div class="masthead"><h1>tmux<span class="d">編集局</span></h1><div class="sub">締切までに、紙面を組む</div></div>
+    <div class="ear r"><b>通算 39 本校了</b>自己ベスト 朝刊 48.2 秒<br>称号 デスク</div>
+  </div>
+  <div class="dateline"><span>2026年（令和8年）10月20日 火曜日</span><span>tmux 新聞社 編集局 ・ 第 1 号</span><span>prefix Ctrl+b</span></div>
+  <div class="front-body">
+    <div class="lead">
+      <h2>締切までに、<em>紙面を組め</em>。</h2>
+      <div class="cols">
+        <p>ここは tmux 新聞社の編集局。目の前のゲラ（ウィンドウ）には、段（ペイン）がひとつしかない。デスクの指示が次々に飛んでくる。段を割れ、特ダネを一面トップに、古い記事はボツに、原稿は切り貼りで。</p>
+        <p>指示に書かれたキーを打って紙面を組み、全本を校了するまでの時間を競う。誤植（違うキー）は +2 秒。締切を過ぎても本は飛ばない。デスクが赤字でキーを書き足し、それでも組めなければ先輩が横について 1 手ずつ教える。</p>
+      </div>
+      <div class="setting">prefix <span class="seg"><span class="on">Ctrl+b</span><span>Ctrl+a</span></span><span>・ 迷ったら prefix → i で 用字用語集</span></div>
+      <div class="cta">
+        <button class="btn primary">輪転機を回す<small>朝刊 20 本 から</small></button>
+        <button class="btn shu">縮刷版<small>記録を見る</small></button>
+      </div>
+      <p style="font-family:var(--sans);font-size:12px;color:var(--ink-dim);margin:16px 0 0">はじめての人は夕刊へ。1 本 1 キーで、指示メモを見ながら組める。通信はしない。記録はこのブラウザの中だけ。</p>
+    </div>
+    <aside>
+      <div class="deadlines">
+        <div class="h">締 切 表 <small>コースを選ぶ</small></div>
+        <div class="row">
+          <div><div class="nm">夕刊 <span class="n">15 本</span></div><div class="ds">締切 12 秒／本。段を割る・赤ペンを移す・一面トップ・ボツ・面をめくる。</div></div>
+          <div class="bt">自己ベスト<b>28.4秒</b>五回平均 30.1 ・ 12 回</div>
+        </div>
+        <div class="row hot">
+          <div><div class="nm">朝刊 <span class="n">20 本</span><span class="rec">おすすめ</span></div><div class="ds">締切 14 秒／本。段幅・見出し・差し替え・面ごとボツ・原稿の読み直しも混ざる。</div></div>
+          <div class="bt">自己ベスト<b>48.2秒</b>五回平均 51.0 ・ 27 回</div>
+        </div>
+        <div class="row">
+          <div><div class="nm">号外 <span class="n">16 本</span><span class="stamp">特報</span></div><div class="ds">締切 18 秒／本。1 本で 2〜3 手。考える前に手が動くか。</div></div>
+          <div class="bt">自己ベスト<b>—</b>目標 77 秒</div>
+        </div>
+      </div>
+      <div class="ad">目標の秒数より早く校了すると「刷り部数」が伸びる。締切 13.8 秒前に校了 → 朝刊 64 万部。締切を過ぎた本は「延長」として縮刷版に残り、苦手な指示が分かる。</div>
+    </aside>
+  </div>
+  <div class="ticker"><span><b>昨日の見出し</b>朝刊 49.6 秒、記者が「デスク」に昇進</span><span><b>延長が多い指示</b>原稿の冒頭へ戻る（prefix → [ → g）平均 4.8 秒</span><span><b>号外</b>三段組みの「三叉」はまだ未校了</span></div>
+</section>
+
+<div class="cap"><b>案C 編集局</b> ② プレイ中 — 暗い机の上に、デスクの指示メモとゲラ（tmux）。締切を過ぎて赤字が入った状態</div>
+<section class="screen play">
+  <div class="bar">
+    <div class="logo">tmux<span class="d">編集局</span></div>
+    <div class="ed">朝刊 ・ <b>7 / 20 本</b></div>
+    <div class="ed">prefix Ctrl+b</div>
+    <div class="sp"></div>
+    <div class="pen">誤植 1（+2秒）</div>
+    <div class="time">48.2<small>秒</small></div>
+  </div>
+  <div class="play-body">
+    <div>
+      <div class="memo">
+        <span class="clip"></span>
+        <div class="lab">デスクからの指示</div>
+        <div class="no">7 本目 ／ 20</div>
+        <div class="q">特ダネの記事へ<br>赤ペンを移せ</div>
+        <div class="keys"><kbd class="pfx done">Ctrl+b</kbd><span class="arr">→</span><kbd>←</kbd><kbd class="next">→</kbd><kbd>↑</kbd><kbd>↓</kbd></div>
+        <div class="hint">Ctrl+b を押して離してから 矢印キー</div>
+        <div class="deadline">
+          <div class="l"><span>締切 14 秒</span><b>延長 +3.2 秒</b></div>
+          <div class="gauge"><i></i><i class="over"></i></div>
+          <div class="akaji">
+            <div class="t"><span class="st">赤字</span>先輩が横についた</div>
+            <ol>
+              <li><span class="no">1</span>prefix Ctrl+b を押して離す ✓</li>
+              <li class="now"><span class="no">2</span>特ダネは右の段。→ を押す</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+      <div class="toast">
+        <span class="chip good">ノー誤植 ・ 5 本連続</span>
+        <span class="chip miss"><span class="st">誤植</span> +2 秒</span>
+        <span class="chip note">延長した本は縮刷版に「延」の印で残る</span>
+      </div>
+    </div>
+    <div class="galley">
+      <div class="ghead"><span>ゲラ ・ 一面</span><span>朝刊 第 1 版</span><span>校正中</span></div>
+      <div class="term">
+        <div class="pane on"><span class="pt">0 社会面</span><span class="dim">$ </span>cat shakai.txt<br><span class="dim">市内で 猫の集会 ふたたび</span><div class="head">市内で猫の集会<small>いま赤ペンはここ</small></div><div class="lines"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+        <div class="col">
+          <div class="pane"><span class="pt">1 特ダネ</span><span class="dim">$ </span>ls<br><div class="head">特ダネ<small>← 目的の記事</small></div></div>
+          <div class="pane"><span class="pt">2 旧稿</span><span class="dim">$ </span><div class="head" style="color:#8a7d6a">古い記事<small>ボツにするときは x → y</small></div></div>
+        </div>
+      </div>
+      <div class="status"><span>[朝刊]</span><span class="tab on">0:一面*</span><span class="tab">1:二面</span><span class="sp"></span><span>締切 14s/本</span><span>11:31</span></div>
+    </div>
+  </div>
+</section>
+
+<div class="cap"><b>案C 編集局</b> ③ 結果画面 — 校了紙。決めゼリフは「締切 N 秒前に校了」と「刷り部数」</div>
+<section class="screen result">
+  <div class="sheet">
+    <div class="big-stamp">校了</div>
+    <div class="hd">校 了 紙</div>
+    <h2>朝刊 20 本、校了。</h2>
+    <div class="sub">2026年10月20日 ・ 第 28 版 ・ prefix Ctrl+b</div>
+    <div class="tm">48.2<small>秒</small></div>
+    <div class="verdict"><span>締切 <b>13.8 秒前</b> に校了</span><span class="tip">刷り部数 64 万部（目標 62 秒で 50 万部）</span></div>
+    <div class="rank"><span class="meishi">tmux 新聞社 編集局<b>デスク</b></span><span>称号が「記者」から <b>デスク</b> に昇進 ・ ★ 自己ベスト更新</span></div>
+    <div class="facts">
+      <div><span>1 本あたり</span><span>2.41秒</span></div>
+      <div><span>実時間</span><span>46.2秒</span></div>
+      <div><span>誤植</span><span>1（+2秒）</span></div>
+      <div><span>延長（締切超過）</span><span>2 本 ・ 先輩 1</span></div>
+      <div><span>自己ベスト</span><span>48.2秒</span></div>
+      <div><span>五回平均</span><span>50.3秒</span></div>
+    </div>
+    <div class="spark"><i style="height:100%"></i><i style="height:88%"></i><i style="height:80%"></i><i style="height:84%"></i><i style="height:70%"></i><i style="height:72%"></i><i style="height:62%"></i><i style="height:64%"></i><i style="height:58%" class="rec"></i><i style="height:52%" class="now"></i></div>
+    <div class="spark-l"><span>直近 10 版 ・ 延長が多い指示: 原稿の冒頭へ戻る（[ → g）</span><span>■ 自己ベスト ■ 今回</span></div>
+    <div class="cta"><button class="btn primary">次の版を組む</button><button class="btn">縮刷版を開く</button></div>
+  </div>
+</section>
+
+</div>
+</body>
+</html>

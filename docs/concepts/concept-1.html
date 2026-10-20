@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>案A tmux ON AIR — モック</title>
+<style>
+  :root {
+    --sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK JP", monospace;
+    --bg: #0a0d12; --bg-2: #11161e; --panel: #171d27; --panel-2: #1f2733; --line: #2c3645; --line-2: #3b4758;
+    --fg: #e6ebf2; --fg-dim: #8a96a6; --red: #ff2d3a; --red-2: #c3141f; --cyan: #37d6e0; --amber: #ffb02e; --green: #37d67a;
+    --term-bg: #05070b; --term-fg: #d7dee8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #2a2f38; font-family: var(--sans); color: var(--fg); }
+  .page { width: 1280px; margin: 0 auto; padding: 24px 0 60px; }
+  .cap { font: 600 13px/1 var(--sans); color: #d6dbe3; margin: 28px 0 10px; letter-spacing: .08em; display: flex; align-items: center; gap: 10px; }
+  .cap b { background: var(--red-2); color: #fff; border-radius: 999px; padding: 6px 12px; font-weight: 700; }
+  .titles { display: flex; gap: 10px; align-items: center; margin: 0 0 10px; font-size: 13px; color: #d6dbe3; }
+  .titles span { border: 1px solid #5a6474; border-radius: 999px; padding: 4px 12px; font-family: var(--mono); background: #1f2733; }
+  .titles span.rec { background: var(--red-2); color: #fff; border-color: var(--red); }
+  .screen { width: 1280px; position: relative; overflow: hidden; background: var(--bg); box-shadow: 0 14px 40px rgba(0,0,0,.5); border-radius: 6px; }
+  .grid-bg { background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 40px 40px; }
+
+  .onair { display: inline-flex; align-items: center; gap: 10px; background: #1a0508; border: 2px solid var(--red-2); border-radius: 6px; padding: 8px 16px; font-family: var(--mono); font-weight: 700; letter-spacing: .25em; color: var(--red); font-size: 18px; box-shadow: 0 0 24px rgba(255,45,58,.45), inset 0 0 12px rgba(255,45,58,.25); }
+  .onair i { width: 12px; height: 12px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); }
+  .onair.off { color: var(--fg-dim); border-color: var(--line-2); box-shadow: none; background: var(--panel); }
+  .onair.off i { background: var(--line-2); box-shadow: none; }
+
+  /* ---- タイトル ---- */
+  .title { height: 700px; padding: 32px 56px; display: grid; grid-template-columns: 1fr 520px; gap: 48px; align-items: start; }
+  .hero .top { display: flex; align-items: center; gap: 16px; }
+  .hero .top .sta { font-family: var(--mono); color: var(--fg-dim); font-size: 13px; letter-spacing: .2em; }
+  .hero h1 { margin: 30px 0 0; font-size: 84px; line-height: .95; font-weight: 800; letter-spacing: -.02em; color: #fff; white-space: nowrap; }
+  .hero h1 .d { color: var(--red); text-shadow: 0 0 28px rgba(255,45,58,.6); font-family: var(--mono); letter-spacing: .02em; margin-left: 10px; }
+  .hero .sub { font-family: var(--mono); color: var(--cyan); letter-spacing: .4em; font-size: 16px; margin-top: 12px; }
+  .hero p.lead { color: #c3ccd8; font-size: 16px; line-height: 1.9; max-width: 580px; margin: 22px 0 0; }
+  .hero p.lead b { color: #fff; font-weight: 700; }
+  .cta { display: flex; gap: 12px; margin-top: 28px; flex-wrap: wrap; align-items: center; }
+  .btn { font-family: var(--sans); font-size: 18px; font-weight: 700; padding: 15px 24px; border-radius: 4px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--fg); letter-spacing: .06em; }
+  .btn.primary { background: var(--red-2); border-color: var(--red); color: #fff; box-shadow: 0 0 20px rgba(255,45,58,.35); }
+  .btn.ghost { background: transparent; }
+  .btn small { display: block; font-size: 11px; font-weight: 500; letter-spacing: .1em; color: #c3ccd8; margin-top: 4px; font-family: var(--mono); }
+  .setting { margin-top: 22px; color: var(--fg-dim); font-size: 13px; display: flex; align-items: center; gap: 12px; font-family: var(--mono); }
+  .seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 4px; overflow: hidden; }
+  .seg span { padding: 6px 12px; font-family: var(--mono); font-size: 12px; color: var(--fg-dim); }
+  .seg span.on { background: var(--cyan); color: #04171a; font-weight: 700; }
+  .fine { color: var(--fg-dim); font-size: 12px; margin-top: 20px; font-family: var(--mono); line-height: 1.7; }
+  .sched { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .sched .h { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 12px; letter-spacing: .25em; color: var(--fg-dim); }
+  .sched .h b { color: var(--fg); font-size: 14px; }
+  .slot { display: grid; grid-template-columns: 70px 1fr 130px; gap: 14px; padding: 16px; border-bottom: 1px solid var(--line); align-items: center; position: relative; }
+  .slot:last-of-type { border-bottom: 0; }
+  .slot .tc { font-family: var(--mono); font-size: 13px; color: var(--fg-dim); line-height: 1.6; }
+  .slot .tc b { display: block; color: var(--amber); font-size: 18px; }
+  .slot .nm { font-size: 22px; font-weight: 800; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+  .slot .nm .n { font-family: var(--mono); font-size: 13px; color: var(--fg-dim); font-weight: 500; }
+  .slot .nm .rec { font-size: 11px; background: var(--cyan); color: #04171a; padding: 2px 8px; border-radius: 3px; font-weight: 800; }
+  .slot .ds { font-size: 12.5px; color: var(--fg-dim); margin-top: 5px; line-height: 1.6; }
+  .slot .bt { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--fg-dim); line-height: 1.6; white-space: nowrap; }
+  .slot .bt b { display: block; font-size: 22px; color: var(--fg); }
+  .slot .bt b em { font-style: normal; color: var(--cyan); font-size: 13px; margin-left: 6px; }
+  .slot.hot { background: linear-gradient(90deg, rgba(55,214,224,.08), transparent); }
+  .slot.hot::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--cyan); }
+  .wall { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 12px 16px 16px; border-top: 1px solid var(--line); }
+  .wall div { aspect-ratio: 16/9; background: var(--term-bg); border: 1px solid var(--line); border-radius: 2px; position: relative; font-family: var(--mono); font-size: 10px; color: var(--fg-dim); padding: 4px 6px; overflow: hidden; }
+  .wall div.live { border-color: var(--red); box-shadow: inset 0 0 0 1px var(--red); }
+  .wall div.live::after { content: "PGM"; position: absolute; right: 4px; top: 3px; color: var(--red); font-weight: 700; }
+  .wall div.noise { background: repeating-linear-gradient(0deg, #1a1f27 0 2px, #2b3240 2px 3px, #0e1117 3px 5px); }
+  .wall div .tick { position: absolute; left: 6px; bottom: 4px; }
+
+  /* ---- プレイ中 ---- */
+  .play { height: 820px; display: grid; grid-template-rows: 64px 1fr; }
+  .play .bar { display: flex; align-items: center; gap: 22px; padding: 0 24px; background: var(--bg-2); border-bottom: 1px solid var(--line); }
+  .play .bar .logo { font-weight: 800; font-size: 20px; letter-spacing: -.01em; }
+  .play .bar .logo .d { color: var(--red); font-family: var(--mono); margin-left: 6px; }
+  .play .bar .prog { font-family: var(--mono); font-size: 13px; color: var(--fg-dim); letter-spacing: .1em; }
+  .play .bar .prog b { color: var(--fg); font-size: 16px; }
+  .play .bar .sp { flex: 1; }
+  .play .bar .tc { font-family: var(--mono); font-size: 32px; color: var(--fg); letter-spacing: .04em; }
+  .play .bar .tc small { font-size: 12px; color: var(--fg-dim); margin-left: 6px; letter-spacing: .2em; }
+  .play .bar .pen { font-family: var(--mono); font-size: 13px; color: var(--red); }
+  .play-body { display: grid; grid-template-columns: 330px 1fr; gap: 22px; padding: 22px 24px 20px; }
+  .cue { background: #fdfdfb; color: #111; border-radius: 4px; padding: 18px 20px 16px; position: relative; box-shadow: 0 10px 24px rgba(0,0,0,.6); transform: rotate(-1.2deg); }
+  .cue::before { content: ""; position: absolute; left: 20px; right: 20px; top: -6px; height: 14px; background: rgba(255,176,46,.85); transform: rotate(1deg); }
+  .cue .lab { font-size: 11px; letter-spacing: .3em; color: #777; font-weight: 700; }
+  .cue .no { font-family: var(--mono); font-size: 12px; color: #777; margin-top: 8px; }
+  .cue .q { font-size: 30px; font-weight: 900; line-height: 1.35; margin: 6px 0 14px; letter-spacing: .02em; }
+  .cue .q u { text-decoration: none; border-bottom: 4px solid var(--red); }
+  .keys { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  kbd { font-family: var(--mono); font-size: 14px; padding: 5px 9px; border: 1px solid #777; border-bottom-width: 3px; border-radius: 4px; background: #fff; color: #111; }
+  kbd.pfx { background: #111; color: #fff; border-color: #000; }
+  kbd.done { opacity: .4; }
+  kbd.next { border-color: var(--red); box-shadow: 0 0 0 3px rgba(255,45,58,.35); background: #fff; }
+  .keys .arr { color: #777; }
+  .cue .hint { font-size: 12px; color: #666; margin-top: 12px; line-height: 1.6; }
+  .cue .big { margin-top: 12px; border-top: 2px dashed #ddd; padding-top: 10px; }
+  .cue .big .t { font-size: 11px; letter-spacing: .2em; color: var(--red-2); font-weight: 800; }
+  .cue .big ol { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 700; }
+  .cue .big li { display: flex; align-items: center; gap: 8px; color: #999; }
+  .cue .big li.now { color: #111; font-size: 17px; }
+  .cue .big li .no { font-family: var(--mono); font-size: 12px; width: 16px; }
+  .shaku { margin-top: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; }
+  .shaku .l { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); display: flex; justify-content: space-between; letter-spacing: .1em; }
+  .shaku .l b { color: var(--red); font-size: 16px; }
+  .gauge { height: 10px; background: #0c1016; border-radius: 2px; overflow: hidden; margin-top: 6px; border: 1px solid var(--line); display: flex; gap: 2px; padding: 1px; }
+  .gauge i { flex: 1; background: var(--green); }
+  .gauge i.over { background: var(--red); }
+  .toast { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .chip { font-family: var(--mono); font-size: 12px; padding: 7px 12px; border-radius: 3px; background: var(--panel); border: 1px solid var(--line); width: fit-content; display: inline-flex; gap: 8px; align-items: center; letter-spacing: .05em; }
+  .chip.good { color: var(--green); border-color: rgba(55,214,122,.5); font-weight: 700; }
+  .chip.miss { color: var(--red); border-color: var(--red); font-weight: 700; background: #1a0508; }
+  .chip.note { color: var(--fg-dim); }
+  .mv { background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px; padding: 12px; display: grid; grid-template-rows: auto 1fr auto; gap: 8px; }
+  .mv .mh { display: flex; justify-content: space-between; align-items: center; font-family: var(--mono); font-size: 11px; color: var(--fg-dim); letter-spacing: .2em; }
+  .mv .mh .pgm { color: var(--red); font-weight: 700; }
+  .term { background: var(--term-bg); color: var(--term-fg); font-family: var(--mono); font-size: 14px; line-height: 1.45; height: 548px; display: grid; grid-template-columns: 1.3fr 1fr; border: 1px solid var(--line-2); }
+  .pane { position: relative; padding: 24px 12px 10px; overflow: hidden; }
+  .pane + .pane { border-left: 1px solid var(--line-2); }
+  .col { display: grid; grid-template-rows: 1fr 1fr; }
+  .col .pane + .pane { border-left: 0; border-top: 1px solid var(--line-2); }
+  .pane .pt { position: absolute; top: 0; left: 8px; font-size: 12px; color: var(--fg-dim); background: var(--term-bg); padding: 0 6px; }
+  .pane.on { box-shadow: inset 0 0 0 2px var(--red); }
+  .pane.on .pt { color: var(--red); font-weight: 700; }
+  .pane .tally { position: absolute; top: 6px; right: 8px; width: 10px; height: 10px; border-radius: 50%; background: #2b3240; }
+  .pane.on .tally { background: var(--red); box-shadow: 0 0 10px var(--red); }
+  .pane .dim { color: #6a7786; }
+  .pane .cam { font-size: 30px; font-weight: 800; margin-top: 34px; text-align: center; line-height: 1.3; letter-spacing: .05em; }
+  .pane .cam small { display: block; font-size: 12px; font-weight: 400; color: var(--fg-dim); margin-top: 6px; letter-spacing: 0; }
+  .pane .cam.live { color: var(--cyan); }
+  .pane.noise { background: repeating-linear-gradient(0deg, #0b0e13 0 2px, #1b2129 2px 3px, #070a0e 3px 5px); }
+  .pane.noise .cam { color: #8a96a6; }
+  .status { background: #0f1e22; color: var(--cyan); font-family: var(--mono); font-size: 13px; padding: 6px 10px; display: flex; gap: 14px; align-items: center; border: 1px solid #1c3a40; }
+  .status .tab { padding: 1px 6px; }
+  .status .tab.on { background: var(--cyan); color: #04171a; font-weight: 700; }
+  .status .sp { flex: 1; }
+
+  /* ---- 結果 ---- */
+  .result { height: 820px; display: grid; place-items: center; }
+  .card { width: 700px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px; padding: 30px 40px 28px; position: relative; box-shadow: 0 20px 50px rgba(0,0,0,.6); }
+  .card .hd { display: flex; justify-content: space-between; align-items: center; }
+  .card .hd .ttl { font-family: var(--mono); font-size: 12px; letter-spacing: .3em; color: var(--fg-dim); }
+  .card h2 { font-size: 30px; margin: 10px 0 0; font-weight: 800; }
+  .card .sub { font-family: var(--mono); font-size: 13px; color: var(--fg-dim); margin-top: 4px; }
+  .rating { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 18px; align-items: end; }
+  .rating .big { font-family: var(--mono); font-size: 92px; line-height: 1; color: #fff; letter-spacing: -.02em; }
+  .rating .big small { font-size: 34px; color: var(--cyan); margin-left: 4px; }
+  .rating .lab { font-size: 12px; color: var(--fg-dim); letter-spacing: .25em; font-family: var(--mono); }
+  .rating .tm { font-family: var(--mono); font-size: 34px; color: var(--fg); }
+  .rating .tm small { font-size: 14px; color: var(--fg-dim); margin-left: 4px; }
+  .rating .maki { margin-top: 8px; font-size: 18px; font-weight: 700; color: var(--green); }
+  .rating .maki span { color: var(--fg-dim); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  .rank { margin-top: 18px; display: flex; align-items: center; gap: 14px; }
+  .pass { background: #fff; color: #111; border-radius: 4px; padding: 6px 12px; font-size: 12px; line-height: 1.4; border-left: 8px solid var(--red); min-width: 170px; white-space: nowrap; }
+  .pass b { display: block; font-size: 17px; font-weight: 800; }
+  .rank .txt { font-size: 15px; color: #c3ccd8; }
+  .rank .txt b { color: #fff; }
+  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0 30px; margin-top: 16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 10px 0; }
+  .facts div { display: flex; justify-content: space-between; font-size: 14px; padding: 4px 0; font-family: var(--mono); }
+  .facts div span:first-child { font-family: var(--sans); color: var(--fg-dim); }
+  .spark { display: flex; align-items: flex-end; gap: 5px; height: 44px; margin: 14px 0 0; padding: 0 4px; }
+  .spark i { flex: 1; background: #2c3645; border-radius: 2px 2px 0 0; }
+  .spark i.rec { background: var(--amber); }
+  .spark i.now { background: var(--cyan); }
+  .spark-l { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); display: flex; justify-content: space-between; margin-top: 4px; letter-spacing: .05em; }
+  .card .cta { margin-top: 22px; }
+  .card .btn { font-size: 16px; padding: 12px 22px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<div class="cap"><b>案A ON AIR</b> ① タイトル画面 — 副調整室。ON AIR ランプ、右に番組表とモニター壁</div>
+<div class="titles">題名候補: <span class="rec">tmux ON AIR（推奨）</span><span>tmux 生放送</span><span>tmux サブ</span></div>
+<section class="screen title grid-bg">
+  <div class="hero">
+    <div class="top"><span class="onair"><i></i>ON AIR</span><span class="sta">TMUX TV ・ SUB CONTROL ROOM B</span></div>
+    <h1>tmux<span class="d">ON AIR</span></h1>
+    <div class="sub">生放送サブ ― 画面を割って、切り替えて、回し切る</div>
+    <p class="lead">tmux の画面分割は、放送局の副調整室にあるマルチビューそのもの。<br>ディレクターの<b>カンペ</b>どおりに画面を割り、カメラをテイクし、VTR を巻き戻す。<br>生放送を<b>尺どおり</b>に回し切って、視聴率を競う。押すキーはいつもカンペに書いてある。</p>
+    <div class="setting">PREFIX <span class="seg"><span class="on">Ctrl+b</span><span>Ctrl+a</span></span></div>
+    <div class="cta">
+      <button class="btn primary">本番 5 秒前<small>GOLDEN 20 CUTS</small></button>
+      <button class="btn ghost">視聴率速報<small>記録を見る</small></button>
+    </div>
+    <p class="fine">はじめての人は深夜枠へ。1 カット 1 キーで、カンペを見ながら回せる。<br>通信はしない。記録はこのブラウザの中だけ。迷ったら prefix → i で 進行表が出る。</p>
+  </div>
+  <aside class="sched">
+    <div class="h"><b>番組表</b><span>枠を選ぶ</span></div>
+    <div class="slot">
+      <div class="tc">尺<b>12s</b>/cut</div>
+      <div><div class="nm">深夜枠 <span class="n">15 CUTS</span></div><div class="ds">画面を割る・カメラをテイク・フル・落とす・スタジオを替える。</div></div>
+      <div class="bt">自己ベスト<b>28.4<em>25.4%</em></b>Ao5 30.1 ・ 12 本</div>
+    </div>
+    <div class="slot hot">
+      <div class="tc">尺<b>14s</b>/cut</div>
+      <div><div class="nm">ゴールデン <span class="n">20 CUTS</span><span class="rec">おすすめ</span></div><div class="ds">ワイプの大きさ・テロップ・ソース入替・スタジオ閉局・VTR 巻き戻しも混ざる。</div></div>
+      <div class="bt">自己ベスト<b>48.2<em>25.7%</em></b>Ao5 51.0 ・ 27 本</div>
+    </div>
+    <div class="slot">
+      <div class="tc">尺<b>18s</b>/cut</div>
+      <div><div class="nm">年末特番 <span class="n">16 CUTS</span></div><div class="ds">1 カットで 2〜3 手の連続スイッチング。考える前に手が動くか。</div></div>
+      <div class="bt">自己ベスト<b>—</b>目標 77 秒</div>
+    </div>
+    <div class="wall">
+      <div class="live">1CAM<span class="tick">00:48:12</span></div>
+      <div>2CAM<span class="tick">00:48:12</span></div>
+      <div class="noise">NO SIGNAL</div>
+      <div>VTR<span class="tick">REW</span></div>
+    </div>
+  </aside>
+</section>
+
+<div class="cap"><b>案A ON AIR</b> ② プレイ中 — 左にカンペと尺、中央のマルチビューが tmux。尺を押して、フロア D が 1 手ずつカンペを出している状態</div>
+<section class="screen play">
+  <div class="bar">
+    <div class="logo">tmux<span class="d">ON AIR</span></div>
+    <span class="onair" style="font-size:13px;padding:5px 12px"><i></i>ON AIR</span>
+    <div class="prog">GOLDEN ・ CUT <b>07</b> / 20</div>
+    <div class="sp"></div>
+    <div class="pen">放送事故 1（+2s）</div>
+    <div class="tc">00:48.2<small>ELAPSED</small></div>
+  </div>
+  <div class="play-body">
+    <div>
+      <div class="cue">
+        <div class="lab">カンペ ・ D より</div>
+        <div class="no">CUT 07 / 20</div>
+        <div class="q">中継のカメラ、<br><u>テイク</u>！</div>
+        <div class="keys"><kbd class="pfx done">Ctrl+b</kbd><span class="arr">→</span><kbd>←</kbd><kbd class="next">→</kbd><kbd>↑</kbd><kbd>↓</kbd></div>
+        <div class="hint">Ctrl+b を押して離してから 矢印キー</div>
+        <div class="big">
+          <div class="t">押してる！ フロア D が 1 手ずつ出す</div>
+          <ol>
+            <li><span class="no">1</span>Ctrl+b 押して離す ✓</li>
+            <li class="now"><span class="no">2</span>中継は右！ → を押す</li>
+          </ol>
+        </div>
+      </div>
+      <div class="shaku"><div class="l"><span>尺 14s ／ 押し</span><b>+3.2s</b></div><div class="gauge"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="over"></i><i class="over"></i><i class="over"></i></div></div>
+      <div class="toast">
+        <span class="chip good">NO-CUT ・ 5 連続</span>
+        <span class="chip miss">放送事故 +2s</span>
+        <span class="chip note">押したカットは視聴率速報に「押」で残る</span>
+      </div>
+    </div>
+    <div class="mv">
+      <div class="mh"><span>MULTIVIEW ・ STUDIO A</span><span class="pgm">● PGM: 1CAM</span><span>TC 11:31:04</span></div>
+      <div class="term">
+        <div class="pane on"><span class="pt">0 1CAM</span><span class="tally"></span><span class="dim">$ </span>cat studio.txt<br><span class="dim">スタジオ 司会 バストショット</span><div class="cam">1CAM<small>いま PGM に出ている</small></div></div>
+        <div class="col">
+          <div class="pane"><span class="pt">1 中継</span><span class="tally"></span><span class="dim">$ </span>ls<br><div class="cam live">中継<small>← テイクするカメラ</small></div></div>
+          <div class="pane noise"><span class="pt">2 NO SIGNAL</span><span class="tally"></span><div class="cam">NO SIGNAL<small>落とすときは x → y</small></div></div>
+        </div>
+      </div>
+      <div class="status"><span>[golden]</span><span class="tab on">0:Aスタ*</span><span class="tab">1:Bスタ</span><span class="sp"></span><span>尺 14s/cut</span><span>11:31</span></div>
+    </div>
+  </div>
+</section>
+
+<div class="cap"><b>案A ON AIR</b> ③ 結果画面 — 視聴率。決めゼリフは「視聴率 N%」と「巻き N 秒」</div>
+<section class="screen result grid-bg">
+  <div class="card">
+    <div class="hd"><span class="ttl">放 送 終 了</span><span class="onair off"><i></i>OFF AIR</span></div>
+    <h2>ゴールデン 20 カット、無事に放送終了。</h2>
+    <div class="sub">2026-10-20 ・ 28 本目 ・ PREFIX Ctrl+b</div>
+    <div class="rating">
+      <div><div class="lab">視聴率</div><div class="big">25.7<small>%</small></div></div>
+      <div><div class="lab">TIME</div><div class="tm">48.2<small>秒</small></div><div class="maki">巻き 13.8 秒<span>目標 62 秒で 20.0%</span></div></div>
+    </div>
+    <div class="rank"><span class="pass">TMUX TV ・ STAFF PASS<b>ディレクター</b></span><span class="txt">称号が「フロア D」から <b>ディレクター</b> に昇格 ・ ★ PB 更新（49.6 → 48.2）</span></div>
+    <div class="facts">
+      <div><span>1 カットあたり</span><span>2.41s</span></div>
+      <div><span>実時間</span><span>46.2s</span></div>
+      <div><span>放送事故</span><span>1（+2s）</span></div>
+      <div><span>押し（尺超過）</span><span>2 CUTS ・ フロア D 1</span></div>
+      <div><span>PB</span><span>48.2s ・ 25.7%</span></div>
+      <div><span>Ao5</span><span>50.3s</span></div>
+    </div>
+    <div class="spark"><i style="height:100%"></i><i style="height:88%"></i><i style="height:80%"></i><i style="height:84%"></i><i style="height:70%"></i><i style="height:72%"></i><i style="height:62%"></i><i style="height:64%"></i><i style="height:58%" class="rec"></i><i style="height:52%" class="now"></i></div>
+    <div class="spark-l"><span>直近 10 本 ・ 押しが多いカット: VTR 頭まで巻き戻し（[ → g）</span><span>■ PB ■ 今回</span></div>
+    <div class="cta"><button class="btn primary">次の本番</button><button class="btn">視聴率速報を見る</button></div>
+  </div>
+</section>
+
+</div>
+</body>
+</html>
