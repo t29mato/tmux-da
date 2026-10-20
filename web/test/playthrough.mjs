@@ -218,8 +218,8 @@ async function course(browser, prefixOpt, id, viewport, scheme, tag) {
   const page = await ctx.newPage();
   const errors = watch(page);
   await page.goto(PAGE);
-  await page.click(`#title-screen [data-prefix="${prefixOpt}"]`);
-  ok((await st(page)).prefix === prefixOpt, label + ' the prefix is chosen on the title screen');
+  ok((await st(page)).prefix === 'C-b', label + ' the prefix is the default Ctrl+b');
+  ok(!(await page.$('#title-screen [data-prefix]')), label + ' there is no prefix chooser');
   await shot(page, `title-${tag}`);
   await page.click(`#course-list [data-course="${id}"]`);
   await waitPlay(page);
@@ -517,8 +517,8 @@ async function sound(browser) {
 const browser = await chromium.launch();
 try {
   await course(browser, 'C-b', 'easy', DESKTOP, 'dark', 'easy-dark');
-  await course(browser, 'C-a', 'normal', DESKTOP, 'light', 'normal-light');
-  await course(browser, 'C-a', 'hard', PHONE, 'dark', 'hard-phone');
+  await course(browser, 'C-b', 'normal', DESKTOP, 'light', 'normal-light');
+  await course(browser, 'C-b', 'hard', PHONE, 'dark', 'hard-phone');
   await course(browser, 'C-b', 'easy', PHONE, 'light', 'easy-phone-light');
   await guided(browser);
   await noSkip(browser);

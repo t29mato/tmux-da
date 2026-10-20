@@ -28,7 +28,7 @@ open web/index.html                      # macOS
 python3 -m http.server -d web 8000       # または http://localhost:8000/
 ```
 
-- タイトル画面で合図（prefix: Ctrl+b / Ctrl+a）を選ぶ。記録と設定は localStorage に残る（無くても動く）
+- 合図（prefix）は tmux 標準の Ctrl+b。記録と設定は localStorage に残る（無くても動く）
 - Mac で Ctrl+矢印が Mission Control に取られるときは、prefix のあと Option+矢印でも大きさを変えられる
 - 狭い画面では画面下にキーの列が出るので、iPhone でも遊べる
 - 夜の屋敷（ダーク）／昼の屋敷（ライト）は OS 設定に従い、右上のボタンで切り替えられる
