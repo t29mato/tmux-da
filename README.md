@@ -2,6 +2,8 @@
 
 寿司打のように、出されたお題を tmux のキーでさばいてタイムを競うゲーム。押すキーはいつも画面に出るので、遊んでいるうちに指が覚える。
 
+**▶ 今すぐ遊ぶ: https://t29mato.github.io/games/tmux-da/**
+
 - **ブラウザ版（`web/`）**: タイムアタックと、1 面ずつ覚える 3 章 24 面の冒険。インストール不要、通信なし
 - **CLI 版（`./tmux-da`）**: 本物の tmux の中で 11 面を解く
 
@@ -88,3 +90,11 @@ test/playthrough.sh
 ```
 
 キー操作の代わりに tmux のコマンドで全面を解き、見張り役が 1 面ずつ進めるかを確かめる。`script(1)` で疑似端末のクライアントをつなぐので、デタッチと再接続の面も試せる。
+
+## 公開
+
+ブラウザ版は [t29mato.github.io](https://github.com/t29mato/t29mato.github.io) の `games/tmux-da/` から配信している。`web/` を更新したら、隣にクローンしてあるサイトのリポジトリへコピーし、そちらでコミットして push する:
+
+```bash
+scripts/publish.sh            # ../t29mato.github.io/games/tmux-da/ にコピー（SITE_DIR で変更可）
+```
