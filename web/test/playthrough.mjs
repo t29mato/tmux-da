@@ -39,7 +39,15 @@ function ok(cond, what) {
 const DESKTOP = { width: 1280, height: 800 };
 const PHONE = { width: 390, height: 844 };
 
-async function st(page) { return page.evaluate(() => window.tmuxDa.state()); }
+// The state, once a solved question's 成 hold is over (the next question is
+// up). raw: true reads it as it is.
+async function st(page, raw) {
+  for (let i = 0; ; i++) {
+    const s = await page.evaluate(() => window.tmuxDa.state());
+    if (raw || !s.run || s.run.phase !== 'clear' || i > 80) return s;
+    await page.waitForTimeout(25);
+  }
+}
 
 async function shot(page, name) {
   if (!SHOTS) return;
@@ -298,6 +306,36 @@ async function guided(browser, platform) {
 }
 
 // Past the 目安 nothing is skipped: the keys light up, then the 指南.
+// A solved question stays on screen under a 成 seal while its rooms finish
+// moving; the clock stops for it, and any key goes on at once.
+async function clearHold(browser) {
+  const L = '[成]';
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  for (let i = 0; i < 6 && (await st(page, true)).run.phase === 'play'; i++) await followGuide(page, 'Control+b');
+  let s = await st(page, true);
+  ok(s.run.phase === 'clear' && s.run.i === 0, L + ' a solved question is held (' + s.run.phase + ')');
+  ok(await page.$eval('#seal', (e) => e.classList.contains('show')), L + ' the 成 seal is shown');
+  const t0 = await page.$eval('#playbar .pb-time span', (e) => e.textContent);
+  await page.waitForTimeout(250);
+  ok(await page.$eval('#playbar .pb-time span', (e) => e.textContent) === t0, L + ' the clock stands still while held (' + t0 + ')');
+  await page.waitForTimeout(700);
+  s = await st(page, true);
+  ok(s.run.phase === 'play' && s.run.i === 1, L + ' then the next question comes by itself');
+  ok(await page.$eval('#seal', (e) => !e.classList.contains('show')), L + ' and the seal is gone');
+  for (let i = 0; i < 6 && (await st(page, true)).run.phase === 'play'; i++) await followGuide(page, 'Control+b');
+  ok((await st(page, true)).run.phase === 'clear', L + ' the second one is held too');
+  await page.keyboard.press('Control+b');
+  s = await st(page, true);
+  ok(s.run.phase === 'play' && s.run.i === 2 && s.armed, L + ' a key goes on at once, and counts for the next question');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 async function noSkip(browser) {
   const L = '[目安]';
   const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
@@ -667,6 +705,7 @@ try {
   await guided(browser, 'mac');
   await guided(browser, 'pc');
   await noSkip(browser);
+  await clearHold(browser);
   await lineEditing(browser);
   await records(browser);
   await learning(browser);
