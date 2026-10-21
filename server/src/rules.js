@@ -40,7 +40,6 @@ export function checkRun(run) {
   const n = COURSES[run.course];
   if (!n) throw new Fail(400, 'bad course');
   if (run.ver !== VER) throw new Fail(400, 'old rules');
-  if (run.conf) throw new Fail(400, 'own keys are not ranked');
   if (typeof run.id !== 'string' || run.id.length > 40) throw new Fail(400, 'bad id');
   if (!Array.isArray(run.qs) || run.qs.length !== n) throw new Fail(400, 'bad questions');
   const splits = run.qs.map((q) => {

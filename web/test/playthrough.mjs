@@ -392,7 +392,7 @@ async function navigator(browser) {
 }
 
 // A pasted .tmux.conf: its prefix and keys are the game's, the 指南 says
-// them, unknown lines are listed, and the run stays off the boards.
+// them, unknown lines are listed, and the run goes on the boards like any other.
 async function ownConf(browser) {
   const L = '[own conf]';
   const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
@@ -441,7 +441,7 @@ async function ownConf(browser) {
   ok(own.includes('|') || own.includes('-'), L + ' the 指南 splits with | or - (' + own.join(' ') + ')');
   ok(own.some((k) => /^[hjkl]$/.test(k)) && !own.some((k) => /^[←→↑↓]$/.test(k)), L + ' and moves with h/j/k/l, never the arrows');
   ok(!own.includes('%') && !own.includes('"'), L + ' the unbound % and " are never shown');
-  ok(/番付には載らない/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' the result says it stays off the boards');
+  ok(!/番付には載らない/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' the run is not kept off the boards');
   const db = await page.evaluate(() => window.tmuxDa.records());
   ok(db.runs[db.runs.length - 1].conf === 1 && db.runs[db.runs.length - 1].prefix === 'Ctrl+a', L + ' the run is marked as own keys');
   // The default prefix no longer arms, and an unbound key is unbound.
