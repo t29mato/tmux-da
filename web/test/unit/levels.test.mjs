@@ -18,11 +18,11 @@ test('course ids stay easy / normal / hard so old records carry over', () => {
 });
 
 test('rankFor: thresholds by seconds per question, scaled by rankMul', () => {
-  assert.equal(LV.rankFor(1.6), '名匠');
-  assert.equal(LV.rankFor(1.61), 'からくり師');
-  assert.equal(LV.rankFor(5), '仕掛け番');
+  assert.equal(LV.rankFor(1.6), '師範');
+  assert.equal(LV.rankFor(1.61), '師範代');
+  assert.equal(LV.rankFor(5), '初段');
   assert.equal(LV.rankFor(99), '見習い');
-  assert.equal(LV.rankFor(3.2, 2), '名匠', 'a hard question may take twice as long');
+  assert.equal(LV.rankFor(3.2, 2), '師範', 'a hard question may take twice as long');
 });
 
 test('par (当主の刻) is からくり師 pace on every question', () => {

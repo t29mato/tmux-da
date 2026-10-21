@@ -34,14 +34,21 @@ test('add: rank and the rank going up', () => {
   const REC = fresh();
   REC.add(run(75)); // 5.0 s per question
   const s = REC.add(run(30)); // 2.0
-  assert.equal(s.rank, 'からくり師');
+  assert.equal(s.rank, '師範代');
   assert.equal(s.rankUp, true);
 });
 
 test('migrate: schema 2 rank titles become the new ones', () => {
   const REC = fresh({ 'tmux-da': JSON.stringify({ schema: 2, arena: {}, runs: [{ id: 'r_1', course: 'easy', time: 30, rank: '勇者', at: '2026-01-01T00:00:00Z', qs: [] }] }) });
-  assert.equal(REC.runsOf('easy')[0].rank, 'からくり師');
+  assert.equal(REC.runsOf('easy')[0].rank, '師範代');
   assert.equal(REC.load().schema, REC.SCHEMA);
+});
+
+test('migrate: schema 3 house titles become the dojo ones, and so do merged runs', () => {
+  const REC = fresh({ 'tmux-da': JSON.stringify({ schema: 3, arena: {}, runs: [{ id: 'r_1', course: 'easy', time: 30, rank: '屋敷守', at: '2026-01-01T00:00:00Z', qs: [] }] }) });
+  assert.equal(REC.runsOf('easy')[0].rank, '三段');
+  REC.merge([{ id: 'r_2', course: 'easy', time: 20, rank: 'からくり師', at: '2026-01-02T00:00:00Z', qs: [] }]);
+  assert.equal(REC.runsOf('easy')[0].rank, '師範代');
 });
 
 test('migrate: a schema 1 best time becomes one legacy run', () => {
@@ -166,7 +173,7 @@ test('skill: the pace of the latest five runs gives the 腕前', () => {
   assert.equal(+sk.pace.toFixed(3), +((60 + 45 + 36 + 30 + 30) / 5 / 15).toFixed(3));
   assert.ok(sk.lv >= 1 && sk.lv <= 30);
   assert.ok(sk.toNext > 0);
-  assert.equal(sk.title, '屋敷守', '2.68 秒 per question');
+  assert.equal(sk.title, '三段', '2.68 秒 per question');
 });
 
 test('skill: practice runs do not count, and rankMul evens out the houses', () => {

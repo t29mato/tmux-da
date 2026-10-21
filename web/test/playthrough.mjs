@@ -278,7 +278,7 @@ async function course(browser, prefixOpt, id, viewport, scheme, tag, platform = 
   const s = await st(page);
   ok(s.result && s.result.time > 0 && s.result.record, label + ' the result has a time (' + (s.result ? s.result.time.toFixed(1) : '-') + 's) and is a new record');
   ok(/奥の間に辿り着いた/.test(await page.$eval('#result-body', (e) => e.textContent)), label + ' the result says the inner room was reached');
-  ok(/当主の刻/.test(await page.$eval('#result-body .em-verdict', (e) => e.textContent)), label + ' the result compares with 当主の刻');
+  ok(/お手本/.test(await page.$eval('#result-body .em-verdict', (e) => e.textContent)), label + ' the result compares with the お手本 time');
   if (id === 'easy') ok(s.result.misses >= 1, label + ' the miss is in the result');
   await shot(page, `result-${tag}`);
   await page.reload();
@@ -553,7 +553,7 @@ async function noSkip(browser) {
   await waitResult(page, L);
   const r = (await st(page)).result;
   ok(r.overs >= 1, L + ' the result counts 灯り (' + r.overs + ')');
-  ok(/灯り/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' the 絵巻 names the slow question');
+  ok(/時間がかかった|目安超え/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' the 絵巻 names the slow question');
   const db = await page.evaluate(() => window.tmuxDa.records());
   const q = db.runs[db.runs.length - 1].qs[0];
   ok(q.o === 1 && q.s > 12, L + ' the first question is stored with its overrun (' + q.s + 's)');
@@ -619,12 +619,12 @@ async function records(browser) {
   page.on('dialog', (d) => d.accept());
   await page.goto(PAGE);
   const names = await page.$$eval('.wing-name', (els) => els.map((e) => e.firstChild.textContent));
-  ok(names.join('|') === '三間屋敷|八間屋敷|百間屋敷', L + ' the three houses are named (' + names.join('|') + ')');
+  ok(names.join('|') === '入門|中級|上級', L + ' the three courses are named (' + names.join('|') + ')');
   const modes = await page.$$eval('.wing-mode', (els) => els.map((e) => e.textContent));
   ok(modes.join('|') === '手ならし|腕試し|真剣勝負', L + ' the three modes are named (' + modes.join('|') + ')');
   ok(await page.$$eval('.wing-mode.rec', (els) => els.length === 1 && !!els[0].closest('[data-course="easy"]')), L + ' only 三間屋敷 is recommended');
-  ok(/当主の刻 36 秒/.test(await page.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' a house with no runs shows 当主の刻');
-  ok(/三間屋敷/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' 屋敷に入る starts with 三間屋敷 (手ならし) the first time');
+  ok(/お手本 36 秒/.test(await page.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' a course with no runs shows the お手本 time');
+  ok(/入門/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' はじめる starts with 入門 the first time');
   ok(await page.$eval('.wing[data-course="easy"]', (e) => e.classList.contains('hot')), L + ' 三間屋敷 is picked the first time');
 
   // Run 1, with one deliberate miss.
@@ -638,7 +638,7 @@ async function records(browser) {
   ok(/出発点/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' first run says it is the starting point');
   let db = await page.evaluate(() => window.tmuxDa.records());
   const run = db.runs[0];
-  ok(db.schema === 3 && db.runs.length === 1 && run.id && run.at && run.rank && run.course === 'easy' && run.ver === 2, L + ' the run is stored with id, time, rank and ver 2');
+  ok(db.schema === 4 && db.runs.length === 1 && run.id && run.at && run.rank && run.course === 'easy' && run.ver === 2, L + ' the run is stored with id, time, rank and ver 2');
   ok(run.qs.length === 15 && run.qs.every((q) => typeof q.s === 'number' && q.s >= 0), L + ' every question has its seconds');
   ok(run.qs.some((q) => q.m >= 1), L + ' the deliberate miss is on its question');
 
@@ -669,7 +669,7 @@ async function records(browser) {
   await page.reload();
   ok((await page.evaluate(() => window.tmuxDa.records())).runs.length === 2, L + ' runs survive a reload');
   ok(/通算 2 回/.test(await page.$eval('#btn-records', (b) => b.textContent)), L + ' the title offers the 絵巻 with the count');
-  ok(/三間屋敷/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' 屋敷に入る now starts the house played last');
+  ok(/入門/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' はじめる now starts the course played last');
   await page.click('#btn-records');
   ok((await st(page)).screen === 'records', L + ' the title button opens the 絵巻');
   await page.click('#btn-records-back');
@@ -688,12 +688,12 @@ async function records(browser) {
   await p2.evaluate(() => localStorage.setItem('tmux-da', JSON.stringify({ prefix: 'C-b', level: 5, arena: { 'tmux:easy': { time: 30.5, misses: 1, date: '2026-01-01' } } })));
   await p2.reload();
   db = await p2.evaluate(() => window.tmuxDa.records());
-  ok(db.schema === 3 && db.runs.length === 1 && db.runs[0].legacy === true && db.runs[0].time === 30.5, L + ' an old best becomes a legacy run');
+  ok(db.schema === 4 && db.runs.length === 1 && db.runs[0].legacy === true && db.runs[0].time === 30.5, L + ' an old best becomes a legacy run');
   ok(/30\.5秒/.test(await p2.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' the old best shows on the house');
   await p2.evaluate(() => localStorage.setItem('tmux-da', JSON.stringify({ schema: 2, arena: { 'tmux:normal': { time: 50 } }, runs: [{ id: 'a', course: 'normal', ver: 1, at: '2026-02-01T00:00:00Z', time: 50, misses: 0, timeouts: 1, n: 20, rank: '勇者', rec: true, qs: [{ t: 'focus', s: null, m: 0, to: 1 }] }] })));
   await p2.reload();
   db = await p2.evaluate(() => window.tmuxDa.records());
-  ok(db.schema === 3 && db.runs[0].rank === 'からくり師', L + ' schema 2 runs get the new titles (勇者 → からくり師)');
+  ok(db.schema === 4 && db.runs[0].rank === '師範代', L + ' schema 2 runs get the new titles (勇者 → 師範代)');
 
   // The cap, and the weakness ranking, through the module directly.
   const capped = await p2.evaluate(() => {
@@ -707,7 +707,7 @@ async function records(browser) {
   ok(capped.n <= 100 && capped.recs === 5, L + ' the history is capped at 100 per house and keeps record runs (' + capped.n + ', ' + capped.recs + ' records)');
   await p2.evaluate(() => {
     const qs = (slow) => ['focus', 'resize', 'swap', 'copy_top', 'rename'].map((t) => ({ t, s: t === 'copy_top' ? slow : 1.5, m: 0, o: t === 'copy_top' ? 1 : undefined }));
-    const runs = [1, 2, 3, 4, 5].map((i) => ({ id: 'w' + i, course: 'normal', ver: 2, at: '2026-03-0' + i + 'T00:00:00Z', time: 60 - i, misses: 0, n: 20, rank: '屋敷守', rec: i === 5, qs: qs(16) }));
+    const runs = [1, 2, 3, 4, 5].map((i) => ({ id: 'w' + i, course: 'normal', ver: 2, at: '2026-03-0' + i + 'T00:00:00Z', time: 60 - i, misses: 0, n: 20, rank: '三段', rec: i === 5, qs: qs(16) }));
     localStorage.setItem('tmux-da', JSON.stringify({ schema: 3, arena: { 'tmux:normal': { time: 55 } }, runs }));
   });
   ok(await p2.evaluate(() => ADV.records.weakness('normal', 10).weak[0].type) === 'copy_top', L + ' the slowest question type comes first in the weakness list');
@@ -716,12 +716,12 @@ async function records(browser) {
   await p2.click('#btn-records');
   ok((await st(p2)).recCourse === 'normal', L + ' the 絵巻 opens on the house played last');
   ok(/スクロール/.test(await p2.$eval('.weak-list li', (e) => e.textContent)), L + ' the weakness panel names the scroll question first');
-  ok(/灯り 5/.test(await p2.$eval('.weak-list li', (e) => e.textContent)), L + ' the weakness panel counts the 灯り');
+  ok(/目安超え 5/.test(await p2.$eval('.weak-list li', (e) => e.textContent)), L + ' the weakness panel counts the overruns');
   ok(/−\d/.test(await p2.$eval('.rec-log', (e) => e.textContent)), L + ' the headline shows how much faster the best is than the first run');
   const sw = await p2.evaluate(() => document.documentElement.scrollWidth);
   ok(sw <= PHONE.width, L + ' no horizontal page scroll on a phone (' + sw + 'px)');
   await shot(p2, 'records-phone');
-  ok(await p2.evaluate(() => ADV.levels.rankFor(4.0, 2) === 'からくり師' && ADV.levels.rankFor(4.0) === '仕掛け番'), L + ' the hard house scales the rank thresholds');
+  ok(await p2.evaluate(() => ADV.levels.rankFor(4.0, 2) === '師範代' && ADV.levels.rankFor(4.0) === '初段'), L + ' the hard house scales the rank thresholds');
   await ctx2.close();
 }
 
@@ -820,7 +820,7 @@ async function learning(browser) {
   await page.click('.quit.to-title');
   await page.keyboard.press('r');
   ok((await st(page)).screen === 'records', L + ' R opens the 絵巻');
-  ok(/覚えた仕掛け/.test(await page.$eval('#records-body', (e) => e.textContent)), L + ' the 絵巻 lists what is learnt');
+  ok(/覚えた問題/.test(await page.$eval('#records-body', (e) => e.textContent)), L + ' the 絵巻 lists what is learnt');
   await page.keyboard.press('Escape');
   ok((await st(page)).screen === 'title', L + ' Esc goes back');
 
