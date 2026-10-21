@@ -171,6 +171,7 @@ async function followGuide(page, prefix) {
   const label = mv.keys[0];
   let m;
   if (label === '0-9') await page.keyboard.press(/(\d+) 番/.exec(mv.text)[1]);
+  else if ((m = /^Ctrl\+([hjkl\\])$/.exec(label))) await page.keyboard.press('Control+' + (m[1] === '\\' ? 'Backslash' : m[1]));
   else if ((m = /^(Ctrl|Option)\+(.)$/.exec(label))) {
     const key = (m[1] === 'Ctrl' ? 'Control+' : 'Alt+') + ARROW[m[2]];
     for (let i = 0; i < (m[1] === 'Ctrl' ? 6 : 1); i++) await page.keyboard.press(key);
@@ -305,7 +306,62 @@ async function guided(browser, platform) {
   await ctx.close();
 }
 
-// Past the 目安 nothing is skipped: the keys light up, then the 指南.
+// Moving between rooms: the 別解 (o, ;) beside the 指南, and the
+// vim-tmux-navigator setting (Ctrl+h/j/k/l, no prefix).
+async function navigator(browser) {
+  const L = '[navigator]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  ok(await page.$eval('#nav-conf', (e) => e.hidden), L + ' the .tmux.conf lines are hidden by default');
+  // Default: arrows, with o / ; offered as 別解.
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  let alts = 0;
+  for (let guard = 0; guard < 80; guard++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    if (s.run.next && /^[←→↑↓]$/.test(s.run.next.keys[0] || '')) {
+      const t = await page.$eval('#order', (e) => (e.querySelector('.ob-alt') || {}).textContent || '');
+      if (/別解/.test(t) && /o|;/.test(t)) alts++;
+    }
+    await followGuide(page, 'Control+b');
+  }
+  await waitResult(page, L);
+  ok(alts >= 1, L + ' o / ; are shown as 別解 next to the arrows (' + alts + ')');
+  ok((await st(page)).result.misses === 0, L + ' following the arrows makes no miss');
+  // o and ; themselves solve a move.
+  await page.click('#result-body [data-title]');
+  await page.click('[data-nav="vim"]');
+  ok(await page.$eval('#nav-conf', (e) => !e.hidden), L + ' choosing vim-tmux-navigator shows the .tmux.conf lines');
+  ok((await st(page)).nav === 'vim' && JSON.parse(await page.evaluate(() => localStorage.getItem('tmux-da'))).nav === 'vim', L + ' the setting is kept');
+  await page.reload();
+  ok((await st(page)).nav === 'vim' && await page.$eval('[data-nav="vim"]', (e) => e.getAttribute('aria-pressed') === 'true'), L + ' and survives a reload');
+  // vim: the guide says Ctrl+h/j/k/l, no prefix, and following it solves the house.
+  await page.click('#course-list [data-course="normal"]');
+  await waitPlay(page);
+  let ctrl = 0, bad = 0, lit = 0;
+  for (let guard = 0; guard < 120; guard++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    const n = s.run.next;
+    if (n && /^[←→↑↓]$/.test(n.keys[0] || '')) bad++;
+    if (n && /^Ctrl\+[hjkl\\]$/.test(n.keys[0] || '')) {
+      ctrl++;
+      if (n.pfx) bad++;
+      if (!s.run.folded && !lit++) ok(/Ctrl\+[hjkl]/.test(await page.$eval('#order .ob-keys', (e) => e.textContent)), L + ' the order bar lights Ctrl+h/j/k/l');
+    }
+    await followGuide(page, 'Control+b');
+  }
+  await waitResult(page, L);
+  ok(lit >= 1, L + ' a move was shown in the order bar');
+  ok(ctrl >= 2 && bad === 0, L + ' every move is Ctrl+h/j/k/l without the prefix (' + ctrl + ' moves, ' + bad + ' arrows)');
+  ok((await st(page)).result.misses === 0, L + ' following Ctrl+h/j/k/l makes no miss');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // A solved question stays on screen under a 成 seal while its rooms finish
 // moving; the clock stops for it, and any key goes on at once.
 async function clearHold(browser) {
@@ -336,6 +392,7 @@ async function clearHold(browser) {
   await ctx.close();
 }
 
+// Past the 目安 nothing is skipped: the keys light up, then the 指南.
 async function noSkip(browser) {
   const L = '[目安]';
   const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
@@ -706,6 +763,7 @@ try {
   await guided(browser, 'pc');
   await noSkip(browser);
   await clearHold(browser);
+  await navigator(browser);
   await lineEditing(browser);
   await records(browser);
   await learning(browser);
