@@ -63,12 +63,12 @@ function watch(page) {
   return errors;
 }
 
-// Move the focus to the pane that holds `scene`, with the arrow keys.
-async function goTo(page, scene, prefix) {
+// Move the focus to the (first) pane the 完成図 marks, with the arrow keys.
+async function goTo(page, prefix) {
   for (let i = 0; i < 16; i++) {
-    const d = await page.evaluate((scene) => {
+    const d = await page.evaluate(() => {
       const a = document.querySelector('.pane.active');
-      const t = document.querySelector('.pane[data-scene="' + scene + '"]');
+      const t = document.querySelector('.pane.wanted');
       if (!a || !t) return null;
       if (a === t) return 'done';
       const ar = a.getBoundingClientRect(), tr = t.getBoundingClientRect();
@@ -79,7 +79,7 @@ async function goTo(page, scene, prefix) {
       if (overlapX && !overlapY) return dy < 0 ? 'U' : 'D';
       if (overlapY && !overlapX) return dx < 0 ? 'L' : 'R';
       return Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'L' : 'R') : (dy < 0 ? 'U' : 'D');
-    }, scene);
+    });
     if (d === 'done') return true;
     if (!d) return false;
     await page.keyboard.press(prefix);
@@ -88,24 +88,20 @@ async function goTo(page, scene, prefix) {
   return false;
 }
 
-async function sceneAtLeft(page, scene) {
-  return page.evaluate((scene) => {
-    const t = document.querySelector('.pane[data-scene="' + scene + '"]');
-    return !!t && parseFloat(t.style.left) === 0;
-  }, scene);
+// Whether the marked pane is at the top left (or the question is over).
+async function wantedAtFirst(page) {
+  return page.evaluate(() => {
+    const t = document.querySelector('.pane.wanted');
+    return !t || (parseFloat(t.style.left) === 0 && parseFloat(t.style.top) === 0);
+  });
 }
 
-async function windowIndex(page, name) {
-  const s = await st(page);
-  const w = s.windows.find((w) => w.name === name);
-  return w ? String(w.index) : null;
-}
-
-// Resize the active pane by a few cells, either way that works.
+// Resize the active pane by a few cells, whichever way works.
 async function resizeSome(page, prefix, prefixOpt) {
-  const before = await page.evaluate(() => document.querySelector('.pane.active').getBoundingClientRect().width);
-  const changed = () => page.evaluate((b) => Math.abs(document.querySelector('.pane.active').getBoundingClientRect().width - b) > 40, before);
-  for (const dir of ['Right', 'Left']) {
+  const size = () => page.evaluate(() => { const r = document.querySelector('.pane.active').getBoundingClientRect(); return [r.width, r.height]; });
+  const before = await size();
+  const changed = async () => { const n = await size(); return Math.abs(n[0] - before[0]) > 40 || Math.abs(n[1] - before[1]) > 40; };
+  for (const dir of ['Right', 'Left', 'Down', 'Up']) {
     await page.keyboard.press(prefix);
     const mod = prefixOpt === 'C-a' ? 'Alt' : 'Control';
     for (let i = 0; i < (mod === 'Alt' ? 2 : 8); i++) await page.keyboard.press(mod + '+Arrow' + dir);
@@ -122,37 +118,38 @@ async function solve(page, prefix, prefixOpt) {
   switch (type) {
     case 'split_lr': await p('%'); break;
     case 'split_tb': await p('"'); break;
-    case 'focus': await goTo(page, 'kakejiku', prefix); break;
+    case 'focus': await goTo(page, prefix); break;
     case 'zoom': case 'unzoom': await p('z'); break;
     case 'close':
-      await goTo(page, 'akima', prefix);
+      await goTo(page, prefix);
       await p('x'); await page.keyboard.press('y');
       break;
     case 'new_window': await p('c'); break;
-    case 'select_window': await p(await windowIndex(page, s.run.goal)); break;
+    case 'select_window': await p(String(s.run.goal.index)); break;
     case 'resize': await resizeSome(page, prefix, prefixOpt); break;
     case 'swap':
     case 'swap_zoom':
-      for (let i = 0; i < 4 && !(await sceneAtLeft(page, 'kakejiku')); i++) await p('{');
+      await goTo(page, prefix);
+      for (let i = 0; i < 8 && !(await wantedAtFirst(page)); i++) await p('{');
       if (type === 'swap_zoom') await p('z');
       break;
     case 'rename':
-      await p(','); await page.keyboard.press('Control+u'); await page.keyboard.type('camp'); await page.keyboard.press('Enter');
+      await p(','); await page.keyboard.press('Control+u'); await page.keyboard.type(s.run.goal); await page.keyboard.press('Enter');
       break;
     case 'kill_window':
-      if (s.activeWindow !== '蔵') await p(await windowIndex(page, '蔵'));
+      if (s.activeIndex !== s.run.goal.index) await p(String(s.run.goal.index));
       await p('&'); await page.keyboard.press('y');
       break;
     case 'copy_top': await p('['); await page.keyboard.press('g'); break;
-    case 'find_zoom': await goTo(page, 'kakejiku', prefix); await p('z'); break;
+    case 'find_zoom': await goTo(page, prefix); await p('z'); break;
     case 'trident': await p('%'); await p('"'); break;
     case 'two_akima':
       for (let i = 0; i < 2; i++) {
-        await goTo(page, 'akima', prefix);
+        await goTo(page, prefix);
         await p('x'); await page.keyboard.press('y');
       }
       break;
-    case 'new_and_home': await p('c'); await p(await windowIndex(page, '母屋')); break;
+    case 'new_and_home': await p('c'); await p(String(s.run.goal.index)); break;
     default: throw new Error('no solver for ' + type);
   }
 }
@@ -160,17 +157,18 @@ async function solve(page, prefix, prefixOpt) {
 // One move of the in-game guide, pressed as written.
 const ARROW = { '←': 'ArrowLeft', '→': 'ArrowRight', '↑': 'ArrowUp', '↓': 'ArrowDown' };
 async function followGuide(page, prefix) {
-  const mv = (await st(page)).run.next;
+  const s = await st(page);
+  const mv = s.run.next;
   if (!mv) return false;
   if (mv.pfx) await page.keyboard.press(prefix);
   if (!mv.keys.length) {
-    // The rename prompt: written as words.
-    await page.keyboard.press('Control+u'); await page.keyboard.type('camp'); await page.keyboard.press('Enter');
+    // The rename prompt: written as words, with the name the order asks for.
+    await page.keyboard.press('Control+u'); await page.keyboard.type(s.run.goal); await page.keyboard.press('Enter');
     return true;
   }
   const label = mv.keys[0];
   let m;
-  if (label === '0-9') await page.keyboard.press(/(\d+) 番/.exec(mv.text)[1]);
+  if (label === '0-9') await page.keyboard.press(/(\d+) を押す/.exec(mv.text)[1]);
   else if ((m = /^Ctrl\+([hjkl\\])$/.exec(label))) await page.keyboard.press('Control+' + (m[1] === '\\' ? 'Backslash' : m[1]));
   else if ((m = /^(Ctrl|Option)\+(.)$/.exec(label))) {
     const key = (m[1] === 'Ctrl' ? 'Control+' : 'Alt+') + ARROW[m[2]];
@@ -179,8 +177,20 @@ async function followGuide(page, prefix) {
   return true;
 }
 
+// A run paused by a stray blur (another window taking the focus while the
+// suite runs) is resumed with a key, and said so.
 async function waitPlay(page) {
-  await page.waitForFunction(() => { const r = window.tmuxDa.state().run; return r && r.phase === 'play'; }, null, { timeout: 15000 });
+  for (let i = 0; i < 2; i++) {
+    try {
+      await page.waitForFunction(() => { const r = window.tmuxDa.state().run; return r && r.phase === 'play'; }, null, { timeout: 15000 });
+      return;
+    } catch (e) {
+      const s = await page.evaluate(() => window.tmuxDa.state());
+      if (!(s.run && s.run.phase === 'pause')) throw new Error('not playing: ' + JSON.stringify({ screen: s.screen, run: s.run && { phase: s.run.phase, i: s.run.i } }));
+      console.log('note the run was paused by a blur; resuming');
+      await page.keyboard.press('Escape');
+    }
+  }
 }
 
 // Plays a whole course; `how` is 'solve' or 'guide'. Returns the types seen.
@@ -207,7 +217,9 @@ async function playCourse(page, prefix, prefixOpt, label, how) {
     try {
       await page.waitForFunction((i) => { const r = window.tmuxDa.state().run; return !r || r.i !== i; }, i, { timeout: 10000 });
     } catch (e) {
-      ok(false, label + ' question ' + (i + 1) + ' (' + s.run.type + ') was not solved by ' + how);
+      const now = await st(page, true);
+      ok(false, label + ' question ' + (i + 1) + ' (' + s.run.type + ') was not solved by ' + how + ': ' +
+        JSON.stringify(now.run && { phase: now.run.phase, i: now.run.i, type: now.run.type, misses: now.run.misses, next: now.run.next && now.run.next.text, armed: now.armed, windows: now.windows }));
       return seen;
     }
   }
@@ -703,7 +715,7 @@ async function records(browser) {
   ok(/五回平均 57\.0/.test(await p2.$eval('[data-course="normal"] .wing-best', (e) => e.textContent)), L + ' the house shows 五回平均 after five runs');
   await p2.click('#btn-records');
   ok((await st(p2)).recCourse === 'normal', L + ' the 絵巻 opens on the house played last');
-  ok(/巻物/.test(await p2.$eval('.weak-list li', (e) => e.textContent)), L + ' the weakness panel names the scroll question first');
+  ok(/スクロール/.test(await p2.$eval('.weak-list li', (e) => e.textContent)), L + ' the weakness panel names the scroll question first');
   ok(/灯り 5/.test(await p2.$eval('.weak-list li', (e) => e.textContent)), L + ' the weakness panel counts the 灯り');
   ok(/−\d/.test(await p2.$eval('.rec-log', (e) => e.textContent)), L + ' the headline shows how much faster the best is than the first run');
   const sw = await p2.evaluate(() => document.documentElement.scrollWidth);
@@ -757,7 +769,7 @@ async function learning(browser) {
   await page.reload();
   ok(/Lv\.\d+/.test(await page.$eval('#skill', (e) => e.textContent)), L + ' the title shows the 腕前: ' + (await page.$eval('#skill .sk-row', (e) => e.textContent)));
   ok(/腕前 Lv\.\d+/.test(await page.$eval('#title-meta', (e) => e.textContent)), L + ' the top bar shows the 腕前');
-  ok(await page.$eval('#btn-keiko', (e) => !e.hidden && /襖をずらす/.test(e.textContent)), L + ' the 稽古の間 offers the weak type');
+  ok(await page.$eval('#btn-keiko', (e) => !e.hidden && /大きさ変更/.test(e.textContent)), L + ' the 稽古の間 offers the weak type');
   ok((await st(page)).quiet === true && await page.evaluate(() => document.body.dataset.quiet === '1'), L + ' the house is quiet by default');
   await shot(page, 'title-skill');
 
@@ -843,25 +855,109 @@ async function longView(browser) {
   await ctx.close();
 }
 
+// The house carries on: the focus, the panes and the windows at the start
+// of a question are those at the end of the one before (plus what the
+// question says it added), the house is never rebuilt, and today's order
+// pairs unzoom right after zoom.
+async function continuity(browser, id) {
+  const L = '[continuity ' + id + ']';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click(`#course-list [data-course="${id}"]`);
+  await waitPlay(page);
+  const first = await st(page);
+  ok(first.windows.map((w) => w.index + ':' + w.name + '/' + w.panes).join(' ') === '0:母屋/3 1:離れ/2 2:蔵/2' && first.activeIndex === 0,
+    L + ' the house starts the same for everyone: 母屋 with 3 panes, 離れ and 蔵 with 2, the focus in 母屋');
+  const qs = first.run.qs;
+  const uz = qs.indexOf('unzoom');
+  if (uz >= 0) ok(qs[uz - 1] === 'zoom', L + ' unzoom comes right after a zoom (' + qs.join(',') + ')');
+  let checked = 0, kept = 0, houses = new Set([first.house]), notes = 0, noted = 0, focusMoved = 0;
+  let end = null;
+  for (let guard = 0; guard < 120; guard++) {
+    const raw = await st(page, true);
+    if (!raw.run) break;
+    if (raw.run.phase === 'clear') { end = raw; await st(page); continue; }
+    if (raw.run.phase !== 'play') { await st(page); continue; }
+    if (end && raw.run.i === end.run.i + 1) {
+      checked++;
+      houses.add(raw.house);
+      const same = raw.activePane === end.activePane && raw.activeIndex === end.activeIndex;
+      if (same) kept++; else focusMoved++;
+      const grew = raw.panes.length > end.panes.length || raw.windows.length > end.windows.length;
+      const unz = end.windows.find((w) => w.active).zoomed && !raw.windows.find((w) => w.active).zoomed;
+      const zoomed = !end.windows.find((w) => w.active).zoomed && raw.windows.find((w) => w.active).zoomed;
+      if (raw.run.note.length) notes++;
+      if (grew || unz || zoomed) { noted++; if (!raw.run.note.length) ok(false, L + ' question ' + (raw.run.i + 1) + ' (' + raw.run.type + ') changed the house without a note'); }
+      else if (!end.panes.every((p) => raw.panes.includes(p))) ok(false, L + ' question ' + (raw.run.i + 1) + ' lost a pane at the boundary');
+      end = null;
+    }
+    await followGuide(page, 'Control+b');
+  }
+  await waitResult(page, L);
+  ok(checked >= qs.length - 3, L + ' boundaries checked: ' + checked + ' of ' + (qs.length - 1));
+  ok(focusMoved === 0, L + ' the focus never moves between questions (' + kept + ' kept, ' + focusMoved + ' moved)');
+  ok(houses.size === 1, L + ' one house for the whole run, never rebuilt');
+  ok(notes === noted, L + ' a note appears exactly when the house had to change (' + notes + ' notes, ' + noted + ' changes)');
+  ok((await st(page)).result.misses === 0, L + ' the guide never leads to a wrong key');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
+// Nothing in the order moves when the prefix is pressed: the tick of a
+// done step has its space from the start.
+async function stillOrder(browser) {
+  const L = '[still order]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  await page.goto(PAGE);
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  await page.click('.detail-toggle');
+  for (let i = 0; i < 20 && !((await st(page)).run.next || {}).pfx; i++) await followGuide(page, 'Control+b');
+  const measure = () => page.evaluate(() => {
+    const x = (sel) => { const e = document.querySelector(sel); return e ? Math.round(e.getBoundingClientRect().left) : null; };
+    const w = (sel) => { const e = document.querySelector(sel); return e ? Math.round(e.getBoundingClientRect().width) : null; };
+    return [x('#term .motd .ob-keys kbd.pfx + .arr'), x('#term .motd .ob-keys kbd:not(.pfx)'), x('#term .motd .ob-txt'), x('#sashizu .sz-keys kbd.pfx + .arr'), w('#sashizu .shinan li:first-child'), w('#term .motd .ob-keys kbd.pfx')];
+  });
+  const before = await measure();
+  ok(before.every((v) => v != null), L + ' the order and the 指南 show the prefix step (' + before.join(',') + ')');
+  await page.keyboard.press('Control+b');
+  ok((await st(page)).armed && await page.$('#term .motd kbd.pfx.done .tick.on') && await page.$('#sashizu .shinan li.done .tick.on'), L + ' the prefix step is ticked off');
+  const after = await measure();
+  ok(before.join(',') === after.join(','), L + ' nothing after the prefix keycap moves (' + before.join(',') + ' → ' + after.join(',') + ')');
+  await page.keyboard.press('Escape');
+  await ctx.close();
+}
+
+// ONLY=records,sound runs just those parts (the names below).
+const only = (process.env.ONLY || '').split(',').filter(Boolean);
+const parts = [
+  ['continuity', (b) => continuity(b, 'easy')],
+  ['continuity', (b) => continuity(b, 'hard')],
+  ['still', stillOrder],
+  ['courses', (b) => course(b, 'C-b', 'easy', DESKTOP, 'dark', 'easy-dark')],
+  ['courses', (b) => course(b, 'C-b', 'normal', DESKTOP, 'light', 'normal-light')],
+  ['courses', (b) => course(b, 'C-b', 'normal', DESKTOP, 'dark', 'normal-pc', 'pc')],
+  ['courses', (b) => course(b, 'C-b', 'hard', PHONE, 'dark', 'hard-phone')],
+  ['courses', (b) => course(b, 'C-b', 'hard', DESKTOP, 'light', 'hard-pc', 'pc')],
+  ['courses', (b) => course(b, 'C-b', 'easy', PHONE, 'light', 'easy-phone-light')],
+  ['guided', (b) => guided(b, 'mac')],
+  ['guided', (b) => guided(b, 'pc')],
+  ['noskip', noSkip],
+  ['clear', clearHold],
+  ['navigator', navigator],
+  ['ownconf', ownConf],
+  ['editing', lineEditing],
+  ['records', records],
+  ['learning', learning],
+  ['longview', longView],
+  ['sound', sound]
+];
 const browser = await chromium.launch();
 try {
-  await course(browser, 'C-b', 'easy', DESKTOP, 'dark', 'easy-dark');
-  await course(browser, 'C-b', 'normal', DESKTOP, 'light', 'normal-light');
-  await course(browser, 'C-b', 'normal', DESKTOP, 'dark', 'normal-pc', 'pc');
-  await course(browser, 'C-b', 'hard', PHONE, 'dark', 'hard-phone');
-  await course(browser, 'C-b', 'hard', DESKTOP, 'light', 'hard-pc', 'pc');
-  await course(browser, 'C-b', 'easy', PHONE, 'light', 'easy-phone-light');
-  await guided(browser, 'mac');
-  await guided(browser, 'pc');
-  await noSkip(browser);
-  await clearHold(browser);
-  await navigator(browser);
-  await ownConf(browser);
-  await lineEditing(browser);
-  await records(browser);
-  await learning(browser);
-  await longView(browser);
-  await sound(browser);
+  for (const [name, fn] of parts) if (!only.length || only.includes(name)) await fn(browser);
 } finally {
   await browser.close();
 }
