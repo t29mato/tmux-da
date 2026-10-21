@@ -422,10 +422,11 @@ async function records(browser) {
   const names = await page.$$eval('.wing-name', (els) => els.map((e) => e.firstChild.textContent));
   ok(names.join('|') === '三間屋敷|八間屋敷|百間屋敷', L + ' the three houses are named (' + names.join('|') + ')');
   const modes = await page.$$eval('.wing-mode', (els) => els.map((e) => e.textContent));
-  ok(modes.join('|') === '手ならし|おすすめ|真剣勝負', L + ' the three modes are named (' + modes.join('|') + ')');
-  ok(await page.$$eval('.wing-mode.rec', (els) => els.length === 1 && !!els[0].closest('[data-course="normal"]')), L + ' only 八間屋敷 is recommended');
+  ok(modes.join('|') === '手ならし|腕試し|真剣勝負', L + ' the three modes are named (' + modes.join('|') + ')');
+  ok(await page.$$eval('.wing-mode.rec', (els) => els.length === 1 && !!els[0].closest('[data-course="easy"]')), L + ' only 三間屋敷 is recommended');
   ok(/当主の刻 36 秒/.test(await page.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' a house with no runs shows 当主の刻');
-  ok(/八間屋敷/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' 屋敷に入る starts with 八間屋敷 the first time');
+  ok(/三間屋敷/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' 屋敷に入る starts with 三間屋敷 (手ならし) the first time');
+  ok(await page.$eval('.wing[data-course="easy"]', (e) => e.classList.contains('hot')), L + ' 三間屋敷 is picked the first time');
 
   // Run 1, with one deliberate miss.
   await page.click('[data-course="easy"]');
