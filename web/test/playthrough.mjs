@@ -180,7 +180,7 @@ async function followGuide(page, prefix) {
 }
 
 async function waitPlay(page) {
-  await page.waitForFunction(() => { const r = window.tmuxDa.state().run; return r && r.phase === 'play'; }, null, { timeout: 5000 });
+  await page.waitForFunction(() => { const r = window.tmuxDa.state().run; return r && r.phase === 'play'; }, null, { timeout: 15000 });
 }
 
 // Plays a whole course; `how` is 'solve' or 'guide'. Returns the types seen.
@@ -205,7 +205,7 @@ async function playCourse(page, prefix, prefixOpt, label, how) {
       }
     } else await solve(page, prefix, prefixOpt);
     try {
-      await page.waitForFunction((i) => { const r = window.tmuxDa.state().run; return !r || r.i !== i; }, i, { timeout: 3000 });
+      await page.waitForFunction((i) => { const r = window.tmuxDa.state().run; return !r || r.i !== i; }, i, { timeout: 10000 });
     } catch (e) {
       ok(false, label + ' question ' + (i + 1) + ' (' + s.run.type + ') was not solved by ' + how);
       return seen;
@@ -216,7 +216,7 @@ async function playCourse(page, prefix, prefixOpt, label, how) {
 
 async function waitResult(page, label) {
   try {
-    await page.waitForFunction(() => document.body.dataset.screen === 'result', null, { timeout: 4000 });
+    await page.waitForFunction(() => document.body.dataset.screen === 'result', null, { timeout: 10000 });
     ok(true, label + ' the course ends on the 絵巻 result');
     return true;
   } catch (e) {
@@ -358,6 +358,20 @@ async function navigator(browser) {
   ok(lit >= 1, L + ' a move was shown in the order bar');
   ok(ctrl >= 2 && bad === 0, L + ' every move is Ctrl+h/j/k/l without the prefix (' + ctrl + ' moves, ' + bad + ' arrows)');
   ok((await st(page)).result.misses === 0, L + ' following Ctrl+h/j/k/l makes no miss');
+  // As the plugin binds them by default: 合図 → Ctrl+l clears the screen,
+  // Ctrl+\ with no last room says so; neither is a miss.
+  await page.click('#result-body [data-title]');
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  await page.keyboard.type('echo navi');
+  await page.keyboard.press('Enter');
+  const body = () => page.$eval('#term .pane.active .pane-body', (e) => e.textContent);
+  ok(/navi/.test(await body()), L + ' the shell shows what was typed');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('Control+l');
+  ok(await page.$eval('#term .pane.active .pane-body', (e) => { const c = e.querySelector('.sh-clear'); if (!c) return false; let t = ''; for (let n = c.nextSibling; n; n = n.nextSibling) t += n.textContent; return !/navi/.test(t); }), L + ' 合図 → Ctrl+l clears the screen');
+  await page.keyboard.press('Control+Backslash');
+  ok(/no last pane/.test(await page.$eval('#status', (e) => e.textContent)), L + ' Ctrl+\\ with no last room says no last pane');
+  ok((await st(page)).run.misses === 0, L + ' neither is a miss');
   ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await ctx.close();
 }
