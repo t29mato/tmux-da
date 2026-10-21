@@ -193,7 +193,7 @@ async function playCourse(page, prefix, prefixOpt, label, how) {
     const i = s.run.i;
     seen.add(s.run.type);
     // The order is in the house, and the 完成図 marks what to change.
-    const ob = await page.$eval('#order .ob-q', (e) => e.textContent).catch(() => '');
+    const ob = await page.$eval('#term .motd .ob-q', (e) => e.textContent).catch(() => '');
     if (ob !== s.run.order) ok(false, label + ' question ' + (i + 1) + ' (' + s.run.type + '): the order bar says "' + ob + '"');
     const marks = await page.$$eval('#term .goal, #status .goal-tab', (e) => e.length);
     if (!marks) ok(false, label + ' question ' + (i + 1) + ' (' + s.run.type + '): no 完成図 mark in the house');
@@ -323,7 +323,7 @@ async function navigator(browser) {
     const s = await st(page);
     if (!s.run || s.run.phase !== 'play') break;
     if (s.run.next && /^[←→↑↓]$/.test(s.run.next.keys[0] || '')) {
-      const t = await page.$eval('#order', (e) => (e.querySelector('.ob-alt') || {}).textContent || '');
+      const t = await page.$eval('#term .motd', (e) => (e.querySelector('.ob-alt') || {}).textContent || '');
       if (/別解/.test(t) && /o|;/.test(t)) alts++;
     }
     await followGuide(page, 'Control+b');
@@ -353,7 +353,7 @@ async function navigator(browser) {
     if (n && /^Ctrl\+[hjkl\\]$/.test(n.keys[0] || '')) {
       ctrl++;
       if (n.pfx) bad++;
-      if (!s.run.folded && !lit++) ok(/Ctrl\+[hjkl]/.test(await page.$eval('#order .ob-keys', (e) => e.textContent)), L + ' the order bar lights Ctrl+h/j/k/l');
+      if (!s.run.folded && !lit++) ok(/Ctrl\+[hjkl]/.test(await page.$eval('#term .motd .ob-keys', (e) => e.textContent)), L + ' the order bar lights Ctrl+h/j/k/l');
     }
     await followGuide(page, 'Control+b');
   }
@@ -414,7 +414,7 @@ async function ownConf(browser) {
   ok(/読み飛ばした 3 行/.test(await page.$eval('#conf-report', (e) => e.textContent)), L + ' 3 lines are listed as passed over');
   await page.click('#course-list [data-course="normal"]');
   await waitPlay(page);
-  ok(/Ctrl\+a/.test(await page.$eval('#order', (e) => e.textContent)), L + ' the order bar shows Ctrl+a as the prefix');
+  ok(/Ctrl\+a/.test(await page.$eval('#term .motd', (e) => e.textContent)), L + ' the order bar shows Ctrl+a as the prefix');
   const seen = new Set();
   for (let guard = 0; guard < 120; guard++) {
     const s = await st(page);
@@ -508,6 +508,12 @@ async function noSkip(browser) {
   await shot(page, 'pause');
   await page.keyboard.press('Space');
   ok((await st(page)).run.phase === 'play' && (await st(page)).run.i === before.i, L + ' a key resumes on the same question');
+  // Any other key resumes and also does its work (the first Ctrl+l after
+  // coming back must move, not just resume).
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.keyboard.press('Control+b');
+  ok((await st(page)).run.phase === 'play' && (await st(page)).armed, L + ' the prefix pressed while paused resumes and arms');
+  await page.keyboard.press('Escape');
   await page.clock.runFor(10500);
   let s = await st(page);
   ok(s.run.i === 0 && s.run.stage === 1, L + ' past 12 秒 of play the question is still there and the 行灯 is lit');
@@ -762,13 +768,13 @@ async function learning(browser) {
   let s = await st(page);
   ok(s.run.course === 'easy', L + ' 1 on the title enters 三間屋敷');
   ok(s.run.folded, L + ' a learnt type starts with its 指南 folded');
-  ok(await page.$('#order .ob-guide.learnt') && !(await page.$('#sashizu .shinan')) && !(await page.$('#order kbd.next')), L + ' folded: no steps, no lit keys, a 覚えた note');
+  ok(await page.$('#term .motd .ob-guide.learnt') && !(await page.$('#sashizu .shinan')) && !(await page.$('#term .motd kbd.next')), L + ' folded: no steps, no lit keys, a 覚えた note');
   ok(s.run.goals >= 1, L + ' the 完成図 still shows what to do');
   await shot(page, 'play-learnt');
   ok(await page.$eval('#sashizu', (e) => e.offsetParent === null), L + ' the side panel is hidden unless asked for');
   await page.clock.runFor(12500);
   s = await st(page);
-  ok(s.run.stage === 1 && !s.run.folded && !!(await page.$('#order .ob-guide:not(.learnt)')), L + ' past the 目安 the 指南 unfolds');
+  ok(s.run.stage === 1 && !s.run.folded && !!(await page.$('#term .motd .ob-guide:not(.learnt)')), L + ' past the 目安 the 指南 unfolds');
   await page.clock.resume();
   // Today's order: leaving and entering again asks the same order.
   const first = s.run.qs;
