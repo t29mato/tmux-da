@@ -1,8 +1,8 @@
-# tmux からくり屋敷（tmux-da）
+# tmux からくり屋敷（tmux-yashiki）
 
 tmux のキーで屋敷の仕掛けを解くタイムアタック。襖を立て（分割）、間を渡り（移動）、大広間にし（全画面）、棟を建て（ウィンドウ）、巻物を読む（コピーモード）。押すキーはいつも画面の「指図」に出ているので、遊んでいるうちに指が覚える。
 
-**▶ 今すぐ遊ぶ: https://t29mato.github.io/games/tmux-da/**
+**▶ 今すぐ遊ぶ: https://t29mato.github.io/games/tmux-yashiki/**
 
 - **ブラウザ版（`web/`）**: 3 つの屋敷のタイムアタック。インストール不要。番付（ランキング）と端末の引き継ぎは任意
 - **CLI 版（`./tmux-da`）**: 本物の tmux の中で 11 面を解く
@@ -82,8 +82,8 @@ test/playthrough.sh
 
 ## 公開
 
-ブラウザ版は [t29mato.github.io](https://github.com/t29mato/t29mato.github.io) の `games/tmux-da/` から配信している。`web/` を更新したら、隣にクローンしてあるサイトのリポジトリへコピーし、そちらでコミットして push する:
+ブラウザ版は [t29mato.github.io](https://github.com/t29mato/t29mato.github.io) の `games/tmux-yashiki/` から配信している。`web/` を更新したら、隣にクローンしてあるサイトのリポジトリへコピーし、そちらでコミットして push する:
 
 ```bash
-scripts/publish.sh            # ../t29mato.github.io/games/tmux-da/ にコピー（SITE_DIR で変更可）
+scripts/publish.sh            # ../t29mato.github.io/games/tmux-yashiki/ にコピー（SITE_DIR で変更可）
 ```

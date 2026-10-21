@@ -1,5 +1,5 @@
 {
-  "name": "tmux-da",
+  "name": "tmux-yashiki",
   "private": true,
   "description": "tmux からくり屋敷: tests and server tooling (the game itself needs no build)",
   "type": "module",
