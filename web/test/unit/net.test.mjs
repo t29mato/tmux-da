@@ -80,13 +80,16 @@ test('useKey: a wrong 合言葉 keeps the old one', async () => {
   await assert.rejects(ADV.net.useKey('not a key'), /bad key/);
 });
 
-test('submit needs a name', async () => {
+test('submit needs a name, and runs on own keys are never sent', async () => {
   const server = fakeServer();
   const ADV = device(server);
   await ADV.net.sync();
   assert.equal(await ADV.net.submit({ id: 'r' }), null);
   await ADV.net.setName('ひよこ');
   assert.equal((await ADV.net.submit({ id: 'r' })).rank, 1);
+  const before = server.calls.length;
+  assert.equal(await ADV.net.submit({ id: 'r2', conf: 1 }), null);
+  assert.equal(server.calls.length, before);
 });
 
 test('offline: calls fail, records stay', async () => {

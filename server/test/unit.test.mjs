@@ -41,6 +41,7 @@ test('checkRun refuses impossible or broken runs', () => {
     ['unknown course', { ...run(20), course: 'nope' }],
     ['practice is never ranked', { ...run(20), course: 'keiko' }],
     ['old rules', { ...run(20), ver: 1 }],
+    ['own keys are not ranked', { ...run(20), conf: 1 }],
     ['a question missing', run(19)],
     ['inhumanly fast', run(20, MIN_PER_Q - 0.01)],
     ['time does not add up', { ...run(20), time: 10 }],

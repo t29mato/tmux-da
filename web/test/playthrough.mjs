@@ -314,7 +314,7 @@ async function navigator(browser) {
   const page = await ctx.newPage();
   const errors = watch(page);
   await page.goto(PAGE);
-  ok(await page.$eval('#nav-conf', (e) => e.hidden), L + ' the .tmux.conf lines are hidden by default');
+  ok((await st(page)).conf === null && /既定/.test(await page.$eval('#conf-state', (e) => e.textContent)), L + ' the keys are the defaults to begin with');
   // Default: arrows, with o / ; offered as 別解.
   await page.click('#course-list [data-course="easy"]');
   await waitPlay(page);
@@ -333,11 +333,14 @@ async function navigator(browser) {
   ok((await st(page)).result.misses === 0, L + ' following the arrows makes no miss');
   // o and ; themselves solve a move.
   await page.click('#result-body [data-title]');
-  await page.click('[data-nav="vim"]');
-  ok(await page.$eval('#nav-conf', (e) => !e.hidden), L + ' choosing vim-tmux-navigator shows the .tmux.conf lines');
-  ok((await st(page)).nav === 'vim' && JSON.parse(await page.evaluate(() => localStorage.getItem('tmux-da'))).nav === 'vim', L + ' the setting is kept');
+  await page.click('#conf-box summary');
+  await page.click('#conf-sample');
+  ok((await st(page)).conf.navigator === true, L + ' the vim-tmux-navigator sample is applied');
+  ok(/vim-tmux-navigator/.test(await page.$eval('#conf-text', (e) => e.value)), L + ' its lines are in the box, to copy');
+  ok(await page.$$eval('#conf-report li', (e) => e.length) === 2, L + ' the report lists the plugin and TPM lines as used');
+  ok(/vim-tmux-navigator/.test(JSON.parse(await page.evaluate(() => localStorage.getItem('tmux-da'))).conf), L + ' the setting is kept');
   await page.reload();
-  ok((await st(page)).nav === 'vim' && await page.$eval('[data-nav="vim"]', (e) => e.getAttribute('aria-pressed') === 'true'), L + ' and survives a reload');
+  ok((await st(page)).conf && (await st(page)).conf.navigator && /自分の設定/.test(await page.$eval('#conf-state', (e) => e.textContent)), L + ' and survives a reload');
   // vim: the guide says Ctrl+h/j/k/l, no prefix, and following it solves the house.
   await page.click('#course-list [data-course="normal"]');
   await waitPlay(page);
@@ -372,6 +375,75 @@ async function navigator(browser) {
   await page.keyboard.press('Control+Backslash');
   ok(/no last pane/.test(await page.$eval('#status', (e) => e.textContent)), L + ' Ctrl+\\ with no last room says no last pane');
   ok((await st(page)).run.misses === 0, L + ' neither is a miss');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
+// A pasted .tmux.conf: its prefix and keys are the game's, the 指南 says
+// them, unknown lines are listed, and the run stays off the boards.
+async function ownConf(browser) {
+  const L = '[own conf]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#conf-box summary');
+  await page.fill('#conf-text', [
+    'unbind C-b',
+    'set -g prefix C-a',
+    'bind C-a send-prefix',
+    'bind | split-window -h -c "#{pane_current_path}"',
+    'bind - split-window -v -c "#{pane_current_path}"',
+    'unbind %',
+    "unbind '\"'",
+    'bind h select-pane -L',
+    'bind j select-pane -D',
+    'bind k select-pane -U',
+    'bind l select-pane -R',
+    'bind x kill-pane',
+    'bind m resize-pane -Z',
+    'set -g mouse on',
+    'set -g status-style bg=colour235',
+    'bind -T copy-mode-vi v send -X begin-selection'
+  ].join('\n'));
+  await page.click('#conf-apply');
+  const c = (await st(page)).conf;
+  ok(c && c.prefix === 'Ctrl+a', L + ' the prefix is Ctrl+a');
+  ok(/合図 Ctrl\+a/.test(await page.$eval('#conf-state', (e) => e.textContent)), L + ' the box says so');
+  ok(await page.$$eval('#conf-report > ul li', (e) => e.length) === 13, L + ' 13 lines are used');
+  ok(/読み飛ばした 3 行/.test(await page.$eval('#conf-report', (e) => e.textContent)), L + ' 3 lines are listed as passed over');
+  await page.click('#course-list [data-course="normal"]');
+  await waitPlay(page);
+  ok(/Ctrl\+a/.test(await page.$eval('#order', (e) => e.textContent)), L + ' the order bar shows Ctrl+a as the prefix');
+  const seen = new Set();
+  for (let guard = 0; guard < 120; guard++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    if (s.run.next && s.run.next.keys[0]) seen.add(s.run.next.keys[0]);
+    await followGuide(page, 'Control+a');
+  }
+  await waitResult(page, L);
+  const r = (await st(page)).result;
+  ok(r.misses === 0, L + ' following the 指南 in these keys makes no miss (' + r.misses + ')');
+  const own = [...seen];
+  ok(own.includes('|') || own.includes('-'), L + ' the 指南 splits with | or - (' + own.join(' ') + ')');
+  ok(own.some((k) => /^[hjkl]$/.test(k)) && !own.some((k) => /^[←→↑↓]$/.test(k)), L + ' and moves with h/j/k/l, never the arrows');
+  ok(!own.includes('%') && !own.includes('"'), L + ' the unbound % and " are never shown');
+  ok(/番付には載らない/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' the result says it stays off the boards');
+  const db = await page.evaluate(() => window.tmuxDa.records());
+  ok(db.runs[db.runs.length - 1].conf === 1 && db.runs[db.runs.length - 1].prefix === 'Ctrl+a', L + ' the run is marked as own keys');
+  // The default prefix no longer arms, and an unbound key is unbound.
+  await page.click('#result-body [data-title]');
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  await page.keyboard.press('Control+b');
+  ok(!(await st(page)).armed, L + ' Ctrl+b is not the prefix any more');
+  await page.keyboard.press('Control+a'); await page.keyboard.press('%');
+  ok(/割り当てがない/.test(await page.$eval('#status', (e) => e.textContent)), L + ' the unbound % says it has no binding');
+  // Back to the defaults.
+  await page.click('#game-screen .quit');
+  await page.click('#conf-reset');
+  ok((await st(page)).conf === null, L + ' 既定に戻す brings the defaults back');
   ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await ctx.close();
 }
@@ -778,6 +850,7 @@ try {
   await noSkip(browser);
   await clearHold(browser);
   await navigator(browser);
+  await ownConf(browser);
   await lineEditing(browser);
   await records(browser);
   await learning(browser);
