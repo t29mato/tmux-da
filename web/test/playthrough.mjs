@@ -868,8 +868,8 @@ async function continuity(browser, id) {
   await page.click(`#course-list [data-course="${id}"]`);
   await waitPlay(page);
   const first = await st(page);
-  ok(first.windows.map((w) => w.index + ':' + w.name + '/' + w.panes).join(' ') === '0:母屋/3 1:離れ/2 2:蔵/2' && first.activeIndex === 0,
-    L + ' the house starts the same for everyone: 母屋 with 3 panes, 離れ and 蔵 with 2, the focus in 母屋');
+  ok(first.windows.map((w) => w.index + ':' + w.name + '/' + w.panes).join(' ') === '0:main/3 1:logs/2 2:build/2' && first.activeIndex === 0,
+    L + ' the house starts the same for everyone: main with 3 panes, logs and build with 2, the focus in main');
   const qs = first.run.qs;
   const uz = qs.indexOf('unzoom');
   if (uz >= 0) ok(qs[uz - 1] === 'zoom', L + ' unzoom comes right after a zoom (' + qs.join(',') + ')');
