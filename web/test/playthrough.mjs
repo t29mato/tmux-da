@@ -428,6 +428,18 @@ async function playtest(browser) {
       const after = await st(page, true);
       ok(after.run.i === i && after.run.phase === 'play', L + ' resize: moving to another pane does not pass it');
     }
+    if (t === 'focus' && !seen.away && s.windows.length > 1) {
+      seen.away = 1;
+      await page.keyboard.press('Control+b'); await page.keyboard.press('n');
+      const away = await st(page, true);
+      ok(away.activeWindow !== s.activeWindow && away.run.next && /^\d$/.test(away.run.next.keys[0]), L + ' focus: in another window, the guide leads back to the window first');
+      ok(!!(await page.$('#status .goal-tab')), L + ' focus: the window with the pane is marked on the status bar');
+      ok(/ウィンドウ \d+:\S+ のペイン \d/.test(await page.$eval('#term .guide-card .ob-q', (e) => e.textContent).catch(() => '')), L + ' focus: the order names the window of the pane');
+      const m0 = away.run.misses;
+      for (let k = 0; k < 6 && (await st(page)).run.i === i; k++) await followGuide(page, 'Control+b');
+      ok((await st(page)).run.i > i && (await st(page, true)).run.misses === m0, L + ' focus: solved from there with no miss');
+      continue;
+    }
     if (t === 'rename' && !seen.rename) {
       seen.rename = 1;
       await page.keyboard.press('Control+b'); await page.keyboard.press(',');
@@ -442,7 +454,7 @@ async function playtest(browser) {
     if (t === 'copy_top') seen.copy = 1;
     await followGuide(page, 'Control+b');
   }
-  ok(seen.resize && seen.rename && seen.copy === 2, L + ' the run had a resize, a rename and a scroll');
+  ok(seen.resize && seen.rename && seen.copy === 2 && seen.away, L + ' the run had a resize, a rename, a scroll and a move from another window');
   ok(!errors.length, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await ctx.close();
 }
