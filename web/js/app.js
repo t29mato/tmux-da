@@ -80,13 +80,10 @@
     b.dataset.detached = S.detached ? '1' : '0';
     b.dataset.stage = S.run && S.run.phase === 'play' ? String(S.run.stage) : '0';
     b.dataset.detail = S.detail ? '1' : '0';
-    b.dataset.quiet = S.quiet ? '1' : '0';
     var dt = $('.detail-toggle');
-    if (dt) { dt.setAttribute('aria-pressed', S.detail ? 'true' : 'false'); dt.textContent = S.detail ? tx('指示の詳細をしまう') : tx('手順の詳細を出す'); }
+    if (dt) { dt.setAttribute('aria-pressed', S.detail ? 'true' : 'false'); dt.textContent = S.detail ? tx('手順の詳細をしまう') : tx('手順の詳細を出す'); }
     var cs = $('#conf-state');
-    if (cs) cs.textContent = S.conf ? tx('自分の設定（合図 {0}）', prefixLabel()) : tx('既定');
-    var qt = $('.quiet-toggle');
-    if (qt) { qt.textContent = S.quiet ? tx('静') : tx('動'); qt.setAttribute('aria-pressed', S.quiet ? 'true' : 'false'); qt.setAttribute('aria-label', S.quiet ? tx('飾りを動かす') : tx('飾りの動きを止める')); qt.title = S.quiet ? tx('静か（飾りは止まっている）') : tx('動く（飾りが動く）'); }
+    if (cs) cs.textContent = S.conf ? tx('自分の設定（prefix {0}）', prefixLabel()) : tx('既定');
   }
 
   // ---- theme and sound ------------------------------------------------------
@@ -638,7 +635,7 @@
       S.graceUntil = 0;
       var pb = CF.lookup(S.conf, 'prefix', k);
       if (pb) return runBinding(pb, win, pane);
-      if (CF.overridden(S.conf, k)) { message('そのキーには割り当てがない'); S.lastAction = 'unbound'; return true; }
+      if (CF.overridden(S.conf, k)) { unbound(k); return true; }
       return prefixedKey(k, win, pane);
     }
 
@@ -667,7 +664,16 @@
 
     if (pane.mode === 'copy') return copyModeKey(k, pane);
 
-    if (k.key === 'Escape') return true;
+    // Esc twice in a row with nothing open: back to the title (the mouse-free
+    // way to やめる).
+    if (k.key === 'Escape') {
+      var now = Date.now();
+      if (now - (S.escAt || 0) < 1000) { S.escAt = 0; leaveRun(); showScreen('title'); return true; }
+      S.escAt = now;
+      message('もう一度 Esc でやめる');
+      S.lastAction = 'brief';
+      return true;
+    }
     var nx = S.run && S.run.phase === 'play' && S.run.q ? guideMove(S.run) : null;
     if (nx && nx.pfx && nx.keys.indexOf(k.key) >= 0 && !k.ctrl && !k.alt) message(tx('{0} がシェルに入った。先に {1}（prefix）を押す', k.key, prefixLabel()));
     return editLine(pane, k, function (line) { runPaneCommand(pane, line); });
@@ -730,7 +736,7 @@
       S.lastAction = 'layout';
       return true;
     }
-    if (k.ctrl || k.alt) { message('そのキーには割り当てがない'); S.lastAction = 'unbound'; return true; }
+    if (k.ctrl || k.alt) { unbound(k); return true; }
 
     var moves = { ArrowLeft: 'L', ArrowRight: 'R', ArrowUp: 'U', ArrowDown: 'D' };
     if (moves[key]) {
@@ -833,9 +839,19 @@
       return true;
     }
     if (key === 'Escape') return true;
-    S.lastAction = 'unbound';
-    message('そのキーには割り当てがない');
+    unbound(k);
     return true;
+  }
+
+  // A prefixed key tmux has nothing for: the miss names the key.
+  function unbound(k) {
+    S.lastAction = 'unbound';
+    message(tx('{0} には割り当てがない', keyLabel(k)));
+  }
+
+  function keyLabel(k) {
+    var key = k.key === ' ' ? 'Space' : k.key === 'Escape' ? 'Esc' : k.key;
+    return (k.ctrl ? 'Ctrl+' : '') + (k.alt ? 'Alt+' : '') + (k.shift && key.length > 1 ? 'Shift+' : '') + key;
   }
 
   function withUnzoom(win) {
@@ -1051,7 +1067,8 @@
   function message(text) {
     S.message = tx(text);
     clearTimeout(S.messageTimer);
-    S.messageTimer = setTimeout(function () { S.message = null; renderStatus(); }, 1800);
+    // The tabs are back: the arrow to a wanted tab too.
+    S.messageTimer = setTimeout(function () { S.message = null; renderStatus(); renderTabArrow(); }, 1800);
   }
 
   // Real keyboard events become the normalised key object.
@@ -1867,7 +1884,7 @@
       b.qlog[b.i].s = +used.toFixed(2);
       // Against the ghost: where you are now versus where it was here.
       if (b.ghost && b.ghost.cum) b.ghostDiff = (performance.now() - b.start) / 1000 + b.penalty - b.ghost.cum[b.i];
-      if (b.streak % 5 === 0) chip('good', '5 問連続 ・ ミスなし');
+      if (b.streak % 5 === 0) chip('good', tx('{0} 問連続 ・ ミスなし', b.streak));
       // Hold the solved rooms on screen while they finish moving, under a
       // 成 seal. The clock stops for it; any key goes on at once.
       b.phase = 'clear';
@@ -2042,7 +2059,8 @@
     var el = $('#today');
     if (!el) return;
     var sk = REC.streak(all);
-    var line = sk.days ? (sk.today ? tx('{0} 日連続', sk.days) : tx('{0} 日連続（今日まだ）', sk.days)) : '';
+    // One day is no streak yet.
+    var line = sk.days >= 2 ? (sk.today ? tx('{0} 日連続', sk.days) : tx('{0} 日連続（今日まだ）', sk.days)) : '';
     el.innerHTML = '<b>' + esc(tx('今日の問題')) + '</b> <span class="today-day">' + esc(dayLabel(LV.dayKey())) + '</span>' +
       (line ? '<span class="today-streak">' + esc(line) + '</span>' : '') +
       '<small>' + esc(tx('今日はみんな同じ順番で出る。日本時間の 0 時に変わる。')) + '</small>';
@@ -2086,7 +2104,7 @@
   // The top bar: the 腕前, always in view.
   function renderMeta(all) {
     var sk = REC.skill(all);
-    $('#title-meta').textContent = sk ? tx('腕前 Lv.{0}', sk.lv) : tx('合図 {0}', prefixLabel());
+    $('#title-meta').textContent = sk ? tx('腕前 Lv.{0}', sk.lv) : 'prefix ' + prefixLabel();
   }
 
   function renderTitle() {
@@ -2147,7 +2165,7 @@
     if (el.dataset.key === key) return;
     el.dataset.key = key;
     var n = b.qs.length;
-    var html = '<div class="sz-lab"><span>' + tx('指 図') + '</span><b>' + kanji(Math.min(b.i + 1, n)) + ' ／ ' + kanji(n) + '</b></div>';
+    var html = '<div class="sz-lab"><span>' + tx('問題') + '</span><b>' + Math.min(b.i + 1, n) + ' / ' + n + '</b></div>';
     if (!playing) {
       html += '<div class="sz-q">' + tx(b.phase === 'count' ? 'はじめる……' : b.phase === 'pause' ? '一時停止中' : b.phase === 'clear' ? '成った' : '') + '</div>';
       el.innerHTML = html;
@@ -2174,7 +2192,7 @@
       html += '<div class="shinan"><div class="shinan-t">' + tx('手順') + '</div><ol>' +
         steps(move).map(function (s, i, all) {
           var now = all.findIndex(function (x) { return !x.done; });
-          return '<li class="' + (s.done ? 'done' : i === now ? 'now' : '') + '"><span class="no">' + kanji(i + 1) + '</span>' + esc(s.text) + tick(s.done) + '</li>';
+          return '<li class="' + (s.done ? 'done' : i === now ? 'now' : '') + '"><span class="no">' + (i + 1) + '</span>' + esc(s.text) + tick(s.done) + '</li>';
         }).join('') + '</ol></div>';
       if (move.alt && move.alt.length) html += '<span class="sz-alt">' + tx('別解: ') + move.alt.map(function (a) { return altHTML(a) + ' ' + esc(a.text); }).join(tx('、')) + '</span>';
     } else if (fold) {
@@ -2216,6 +2234,8 @@
     var st = b.q.step && b.q.step();
     var html = st ? '<div class="ob-whole">' + c + esc(qText(b)) + '</div>' : '';
     html += '<div class="motd-h">' + c + '<span class="ob-n">' + Math.min(b.i + 1, n) + '/' + n + '</span> ' +
+      // Past the 目安: said once on the card, still (the gauge is in the hidden panel).
+      (b.stage >= 1 ? '<span class="ob-over">' + tx('目安を過ぎた') + '</span> ' : '') +
       (st ? '<span class="ob-step">' + (st[0] ? tx('手順 {0}/{1}', st[0], st[1]) : tx('やり直し')) + '</span> ' : '') +
       '<b class="ob-q">' + esc(st ? tx(st[2]) : qText(b)) + '</b></div>';
     if (S.qNote.length) html += '<div class="ob-note">' + c + esc(S.qNote.join(tx('。'))) + '</div>';
@@ -2359,7 +2379,7 @@
     var motdH = 0;
     var marks = goalMarks();
     var wanted = {};
-    marks.forEach(function (g) { if (g.pane) wanted[g.pane] = true; });
+    marks.forEach(function (g) { if (g.pane) wanted[g.pane] = g.mark || 'go'; });
     var active = null;
     lay.panes.forEach(function (r) { if (r.pane.id === win.active) active = r; });
     var fresh = view.session !== S.session || view.win !== win;
@@ -2395,8 +2415,9 @@
       var wpx = r.w * cw, hpx = r.h * ch;
       var room = p.name || '';
       var size = hpx < 110 || wpx < 150 ? 'cramped' : '';
-      el.className = 'pane' + (isActive ? ' active' : '') + (wanted[p.id] ? ' wanted' : '') + (size ? ' ' + size : '') + (el.dataset.anim ? ' ' + el.dataset.anim : '');
-      el.style.cssText = 'left:' + (r.x * cw) + 'px;top:' + (r.y * ch) + 'px;width:' + wpx + 'px;height:' + hpx + 'px';
+      el.className = 'pane' + (isActive ? ' active' : '') + (wanted[p.id] ? ' wanted' + (wanted[p.id] === 'close' ? ' wanted-close' : '') : '') + (size ? ' ' + size : '') + (el.dataset.anim ? ' ' + el.dataset.anim : '');
+      // --numw: the room the number (and the Z flag) takes at the top right.
+      el.style.cssText = 'left:' + (r.x * cw) + 'px;top:' + (r.y * ch) + 'px;width:' + wpx + 'px;height:' + hpx + 'px;--numw:' + numWidth(wpx, win.zoomed) + 'px';
       var decorKey = room + '|' + size;
       if (el.dataset.decor !== decorKey) {
         el.dataset.decor = decorKey;
@@ -2506,7 +2527,7 @@
     // arrow to the tab (renderTabArrow). Otherwise in the middle of your pane.
     if (playing && !anchor && active && !marks.some(function (g) { return g.tab; })) anchor = { x: (active.x + active.w / 2) * cw, y: (active.y + active.h / 2) * ch };
     // Where you stand, said in words on the pane itself: the card never covers it.
-    if (playing && active) term.insertAdjacentHTML('beforeend', '<span class="here-tag" style="left:' + ((active.x + active.w) * cw - (active.w < 16 ? 30 : 46) - (win.zoomed ? 22 : 0)) + 'px;top:' + (active.y * ch + 6) + 'px">' + tx('いまここ') + '</span>');
+    if (playing && active) placeHereTag(term, active, cw, ch, win.zoomed, T.activePane(win).mode === 'copy');
     // A step chip already says what to do here; the tag would repeat it.
     if (playing && anchor) placeCard(term, anchor.x, anchor.y, motdHTML(run, move, fold), run.q.step && run.q.step() ? '' : anchor.tag, '');
     var pk = $(':scope > .picker', term);
@@ -2567,6 +2588,30 @@
 
   var arrowMid = { x: 0, y: 0 };
 
+  function numWidth(wpx, zoomed) { return (wpx < 150 ? 30 : 46) + (zoomed ? 22 : 0); }
+
+  // いまここ, left of the pane number, off the first line of text. A narrow
+  // pane gets a shorter word under the number; a sliver gets a dot. In copy
+  // mode it steps down a line, off the [pos/history] indicator.
+  function placeHereTag(term, a, cw, ch, zoomed, copy) {
+    var el = document.createElement('span');
+    el.className = 'here-tag';
+    el.textContent = tx('いまここ');
+    term.appendChild(el);
+    var left = a.x * cw, w = a.w * cw;
+    var num = numWidth(w, zoomed);
+    var top = a.y * ch + 6 + (copy ? ch : 0);
+    var tw = el.offsetWidth;
+    if (tw + num + 4 > w) {
+      // Under the number instead; a shorter word, or a dot, when even that is too wide.
+      top += a.w * cw < 150 ? 20 : 30;
+      if (tw + 4 > w) { el.textContent = tx('ここ'); tw = el.offsetWidth; }
+      if (tw + 4 > w) { el.textContent = '●'; el.className += ' dot'; tw = el.offsetWidth; }
+      el.style.left = Math.max(left + 2, left + w - tw - 2) + 'px';
+    } else el.style.left = (left + w - num - tw) + 'px';
+    el.style.top = top + 'px';
+  }
+
   // The guide card: the order and the keys, in the one place the eyes go
   // (on the arrow, or on the pane to change). Kept inside the terminal.
   function placeCard(term, x, y, inner, tag, cls) {
@@ -2575,10 +2620,10 @@
     el.innerHTML = (tag ? '<div class="gc-tag">' + esc(tag) + '</div>' : '') + inner;
     term.appendChild(el);
     var w = el.offsetWidth, h = el.offsetHeight, W = term.clientWidth, H = term.clientHeight;
-    // Never on top of "いまここ" or "ここへ": slide up or down off them,
-    // whichever stays closest to the arrow.
+    // Never on top of "いまここ", "ここへ", a pane number or the copy-mode
+    // indicator: slide up or down off them, whichever stays closest to the arrow.
     var tr = term.getBoundingClientRect();
-    var keep = $$(':scope > .here-tag, :scope > .goal .goal-tag', term).map(function (k) {
+    var keep = $$(':scope > .here-tag, :scope > .goal .goal-tag, :scope > .pane .pnum, :scope > .pane [data-copy-ind]', term).map(function (k) {
       var r = k.getBoundingClientRect();
       return { l: r.left - tr.left - 4, t: r.top - tr.top - 4, r: r.right - tr.left + 4, b: r.bottom - tr.top + 4 };
     });
@@ -2600,6 +2645,16 @@
     });
     el.style.left = left + 'px';
     el.style.top = best + 'px';
+    // The chips (a streak, a miss) sit right under the card, where the eyes
+    // are; above it when that is off the foot or on a tag.
+    var chips = $('#chips');
+    if (chips) {
+      // Two chips at most, about 70px; one chip under the card takes 44px.
+      var below = best + h + 6;
+      var hit = function (t, b) { return keep.reduce(function (a, k) { return a + (Math.min(left + 200, k.r) > Math.max(left, k.l) && Math.min(b, k.b) > Math.max(t, k.t) ? 1 : 0); }, 0); };
+      var up = below + 44 > H || hit(below, below + 44) > hit(best - 76, best - 6);
+      chips.style.cssText = 'left:' + left + 'px;right:auto;' + (up ? 'top:auto;bottom:' + (H - best + 6) + 'px' : 'bottom:auto;top:' + below + 'px');
+    }
   }
 
   function arrowSVG(x1, y1, x2, y2, stop, label, cls) {
@@ -2624,9 +2679,10 @@
     var act = $(':scope > .pane.active', term);
     if (!act || S.detached) return;
     var b = S.run, fold = !!(b && folded(b));
-    // The status bar is a prompt now (rename): the card stays, on your pane.
+    // The status bar shows a prompt, a y/n or a message instead of the
+    // tabs: the card stays, on your pane.
     if (!tab) {
-      if (b && b.phase === 'play' && b.q && S.prompt && !$(':scope > .guide-card', term)) {
+      if (b && b.phase === 'play' && b.q && !$(':scope > .guide-card', term)) {
         var tr0 = term.getBoundingClientRect(), ar0 = act.getBoundingClientRect();
         placeCard(term, ar0.left - tr0.left + ar0.width / 2, ar0.top - tr0.top + ar0.height / 2, motdHTML(b, fold ? null : guideMove(b), fold), '', 'tab');
       }
@@ -2866,6 +2922,12 @@
     if (S.clipboard) html += '<span class="st-clip" title="' + tx('コピーした内容') + '">📋</span>';
     html += '<span class="st-host">"dojo"</span><span class="st-clock">' + clock() + '</span></span>';
     bar.innerHTML = html;
+    // A narrow bar: the tab the question wants is scrolled into view.
+    var wins = $('.st-wins', bar), tab = $('.goal-tab', bar);
+    if (wins && tab) {
+      var over = tab.getBoundingClientRect().right - wins.getBoundingClientRect().right;
+      if (over > 0) wins.scrollLeft = over + 4;
+    }
   }
 
   function clock() {
@@ -3067,8 +3129,8 @@
     var isRec = !!(r.record && r.count > 1);
     el.classList.toggle('is-rec', isRec);
     el.innerHTML =
-      '<div class="em-hd">' + tx('絵 巻 ・ {0} 回 目', kanji(Math.min(r.count, 99))) + '</div>' +
-      '<h2 class="em-title">' + (c.practice ? tx('稽古を終えた。') : tx('奥の間に辿り着いた。')) + '</h2>' +
+      '<div class="em-hd">' + tx('{0} 回目', r.count) + '</div>' +
+      '<h2 class="em-title">' + esc(tx('{0} {1} 問、解き終わった', c.title, r.n)) + '</h2>' +
       '<div class="em-sub">' + esc(tx('{0} ・ 問題 {1} ・ {2}', c.title, r.n, wareki(r.at))) + '</div>' +
       '<div class="em-row"><div class="em-time">' + r.time.toFixed(1) + '<small>' + tx('秒') + '</small></div>' +
       '<div class="em-verdict">' + verdict + '<span class="em-tip">' + esc(sub) + '</span></div></div>' +
@@ -3084,6 +3146,7 @@
       '<div><dt>' + tx('押したキー') + '</dt><dd>' + r.keys + '</dd></div>' +
       '</dl>' +
       resultNetHTML(r) +
+      slowestHTML(r) +
       shareHTML(r) +
       spark(r.spark) +
       '<div class="spark-l"><span>' + (slow ? esc(tx('いちばん時間がかかった問題: {0}（{1} → {2}）', tx(slow.text), prefixLabel(), slowKeys.join(' '))) : r.overs ? '' : tx('目安超えなし。どの問題も目安のうちに解いた')) + '</span>' +
@@ -3096,6 +3159,15 @@
       '<button type="button" class="btn ghost" data-title="1">' + tx('コース選択へ') + '<kbd class="hk">Esc</kbd></button></div>';
     renderMeta();
     if ((isRec || r.rankUp) && S.celebrated !== r.runId) { S.celebrated = r.runId; celebrate(); }
+  }
+
+  // The three questions that took longest, with their seconds: what to practise.
+  function slowestHTML(r) {
+    var qs = (r.qlog || []).filter(function (q) { return q && q.s != null; }).sort(function (a, b) { return b.s - a.s; }).slice(0, 3);
+    if (qs.length < 2) return '';
+    return '<div class="em-slow"><div class="rec-head">' + tx('時間がかかった問題') + '</div><ol>' +
+      qs.map(function (q) { return '<li><span>' + esc(typeName(q.t)) + '</span><b>' + tx('{0} 秒', q.s.toFixed(1)) + (q.m ? '<small>' + tx('ミス {0}', q.m) + '</small>' : '') + '</b></li>'; }).join('') +
+      '</ol></div>';
   }
 
   // ---- ランキング and 合言葉 ---------------------------------------------------------
@@ -3235,6 +3307,8 @@
     var me = NET ? NET.state().name : null;
     var key = id + '|' + span;
     var cached = S.boardCache && S.boardCache[key];
+    // From a file:// page nothing is fetched: say so instead of loading forever.
+    var offline = !NET || !/^https?:$/.test(location.protocol);
     var table = function (rows) {
       if (!rows.length) return '<p class="rec-empty">' + tx(span === 'today' ? 'まだ今日の記録はない。一番乗りの好機。' : 'まだ記録がない。') + '</p>';
       return '<table class="rec-table board"><thead><tr><th>' + tx('位') + '</th><th>' + tx('名前') + '</th><th>' + tx('タイム') + '</th><th class="r-note">' + tx('日付') + '</th></tr></thead><tbody>' +
@@ -3245,9 +3319,9 @@
     var note = me ? '<p class="rec-empty">' + tx('「{0}」として載る。名前は「引き継ぎ」で変えられる。', esc(me)) + '</p>'
       : '<p class="rec-empty">' + tx('名前を付けると、遊ぶたびに自分の一番が載る。名前は「引き継ぎ」で付けられる。') + '</p>';
     body.innerHTML = '<div class="rec-panel"><div class="rec-head">' + tx('ランキング ・ {0}', esc(REC.courseOf(id).title)) + '</div>' + seg +
-      '<div class="board-body">' + (cached ? table(cached.rows) : '<p class="rec-empty">' + tx('読み込み中……') + '</p>') + '</div>' + note + '</div>';
+      '<div class="board-body">' + (cached ? table(cached.rows) : '<p class="rec-empty">' + tx(offline ? 'オフラインなのでランキングは見られない' : '読み込み中……') + '</p>') + '</div>' + note + '</div>';
     if (cached && Date.now() - cached.at < 15000) return;
-    if (!NET) return;
+    if (offline) return;
     // Looking at the boards is the player's choice; reading sends nothing of theirs.
     NET.board(id, span).then(function (rows) {
       S.boardCache = S.boardCache || {};
@@ -3363,7 +3437,8 @@
     $$('#records-screen [data-rec-course]').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.recCourse === id ? 'true' : 'false'); });
     var tab = S.recTab || 'growth';
     $$('#records-screen [data-rec-tab]').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.recTab === tab ? 'true' : 'false'); });
-    $('#records-screen .rec-seg').hidden = tab === 'sync';
+    // The course row keeps its space on the 引き継ぎ tab: nothing below jumps.
+    $('#records-screen .rec-seg').classList.toggle('off', tab === 'sync');
     var body = $('#records-body');
     if (tab === 'board') { renderBoard(body, id); return; }
     if (tab === 'sync') { renderSync(body); return; }
@@ -3464,7 +3539,7 @@
     if (!String(text || '').trim()) { el.innerHTML = ''; return; }
     var row = function (x, note) { return '<li><code><i class="no">' + x.no + '</i>' + esc(x.line) + '</code><span' + (note === x.why ? ' class="err"' : '') + '>' + esc(note) + '</span></li>'; };
     var html = '';
-    html += '<h4>' + tx('使う {0} 行', c.used.length) + (c.custom ? tx('（合図 {0}）', esc(c.prefix.label)) : '') + '</h4>';
+    html += '<h4>' + tx('使う {0} 行', c.used.length) + (c.custom ? tx('（prefix {0}）', esc(c.prefix.label)) : '') + '</h4>';
     html += c.used.length ? '<ul>' + c.used.map(function (x) { return row(x, x.say); }).join('') + '</ul>' : '<p>' + tx('ゲームで使える行がなかった。既定のキーで遊ぶ。') + '</p>';
     if (c.skipped.length) {
       html += '<details><summary>' + tx('読み飛ばした {0} 行', c.skipped.length) + '</summary><ul>' + c.skipped.map(function (x) { return row(x, x.why); }).join('') + '</ul></details>';
@@ -3485,10 +3560,8 @@
     var saved = store.load();
     applyTheme(saved.theme === 'dark' || saved.theme === 'light' ? saved.theme : null);
     applySound(saved.sound !== false);
-    // The side panel is the detail; the order is in the house. Quiet (no
-    // looping decoration) unless the player asks for motion.
+    // The side panel is the detail; the order is in the house.
     S.detail = saved.detail === true;
-    S.quiet = saved.quiet !== false;
     // The player's .tmux.conf (the vim-tmux-navigator switch of before
     // becomes the plugin line).
     var ct = typeof saved.conf === 'string' ? saved.conf : saved.nav === 'vim' ? CF.SAMPLE_NAVIGATOR : '';
@@ -3507,7 +3580,6 @@
     });
     $('#conf-reset').addEventListener('click', function () { $('#conf-text').value = ''; applyConf('', true); });
     $('.detail-toggle').addEventListener('click', function () { S.detail = !S.detail; store.save({ detail: S.detail }); syncBody(); if (S.screen === 'game') render(); focusSink(); });
-    $('.quiet-toggle').addEventListener('click', function () { S.quiet = !S.quiet; store.save({ quiet: S.quiet }); syncBody(); });
 
     $$('.theme-toggle').forEach(function (b) { b.addEventListener('click', toggleTheme); });
     $$('.sound-toggle').forEach(function (b) {
@@ -3593,7 +3665,15 @@
     window.addEventListener('blur', pauseRun);
     $('#pause').addEventListener('pointerdown', function (e) { e.preventDefault(); resumeRun(); });
     // Vimium's Esc, a click on a key button: take the focus straight back.
-    $('#sink').addEventListener('blur', function () { setTimeout(focusSink, 0); });
+    // Not from the buttons round the house (やめる, the top bar): a keyboard
+    // user who got there must be able to press them.
+    $('#sink').addEventListener('blur', function () {
+      setTimeout(function () {
+        var a = document.activeElement;
+        if (a && a.closest && a.closest('.game-foot, .topbar')) return;
+        focusSink();
+      }, 0);
+    });
     $('#keybar').addEventListener('click', function (e) {
       var b = e.target.closest('button');
       if (!b) return;
@@ -3647,7 +3727,7 @@
           } : null,
           result: S.result,
           recCourse: S.screen === 'records' ? S.recCourse : null,
-          quiet: S.quiet, detail: S.detail, conf: S.conf ? { prefix: S.conf.prefix.label, binds: S.conf.binds.length, navigator: S.conf.navigator } : null,
+          detail: S.detail, conf: S.conf ? { prefix: S.conf.prefix.label, binds: S.conf.binds.length, navigator: S.conf.navigator } : null,
           cols: S.cols, rows: S.rows
         };
       }
