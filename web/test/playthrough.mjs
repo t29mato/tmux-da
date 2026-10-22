@@ -151,7 +151,11 @@ async function solve(page, prefix, prefixOpt) {
       break;
     case 'new_and_home': await p('c'); await p(String(s.run.goal.index)); break;
     case 'detach_attach': await p('d'); await page.keyboard.type('tmux attach'); await page.keyboard.press('Enter'); break;
-    case 'yank_paste': await p('['); await page.keyboard.press('Space'); await page.keyboard.press('Enter'); await p(']'); break;
+    case 'yank_paste':
+      await p('[');
+      for (const key of ['ArrowUp', 'Home', 'Space', 'End', 'Enter']) await page.keyboard.press(key);
+      await p(']');
+      break;
     default: throw new Error('no solver for ' + type);
   }
 }
@@ -805,10 +809,12 @@ async function lineEditing(browser) {
   await k('Control+b'); await k('[');
   await k('v');
   ok(/矩形/.test(await page.$eval('#status', (e) => e.textContent)), L + ' v in tmux copy mode explains rectangle-toggle');
+  // The copy cursor starts on the prompt line, as in tmux; C-p goes up a line.
+  ok((await st(page)).copyAt.ln === (await st(page)).copyAt.lines, L + ' copy mode begins on the prompt line');
   await k('Control+p'); await k('Control+p');
-  await k('Control+Space'); await k('Alt+w');
+  await k('Control+a'); await k('Control+Space'); await k('Control+e'); await k('Alt+w');
   const s = await st(page);
-  ok(!s.copyMode && s.clipboard.length > 0, L + ' C-Space then M-w copies (' + JSON.stringify(s.clipboard) + ')');
+  ok(!s.copyMode && s.clipboard.length > 0, L + ' C-a, C-Space, C-e then M-w copies the line (' + JSON.stringify(s.clipboard) + ')');
   // Leaving mid-run goes back to the title and keeps nothing.
   await page.click('#game-screen .quit');
   ok((await st(page)).screen === 'title' && (await page.evaluate(() => window.tmuxDa.records().runs.length)) === 0, L + ' 屋敷を出る returns to the title without a record');
@@ -964,11 +970,11 @@ async function learning(browser) {
   const errors = watch(page);
   await page.clock.install();
   await page.goto(PAGE);
-  // Every easy type solved cleanly three times: all learnt. 'resize' slow
-  // and over the 目安: the weak one.
+  // Every easy type solved cleanly five times (LEARNT_AFTER): all learnt.
+  // 'resize' slow and over the 目安: the weak one.
   await page.evaluate(() => {
     const types = [...new Set(ADV.levels.COURSES[0].qs)];
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < ADV.levels.LEARNT_AFTER; k++) {
       ADV.records.add({ course: 'easy', prefix: 'C-b', time: 30, raw: 30, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: types.map((t) => ({ t, s: 1.5, m: 0 })) });
     }
     ADV.records.add({ course: 'normal', prefix: 'C-b', time: 60, raw: 60, misses: 0, overs: 1, guides: 0, keys: 30, n: 20, qs: Array.from({ length: 6 }, () => ({ t: 'resize', s: 13, m: 0, o: 1 })) });
@@ -1303,7 +1309,9 @@ async function qa(browser) {
   await page.waitForTimeout(1900);
   ok(/0:main-Z/.test(await status()), L + ' the Z flag shows on a zoomed window that is not the active one (' + (await status()).slice(0, 40) + ')');
   await p('0'); await p('z');
-  // ' asks for a window number.
+  // ' asks for a window number (while the guide wants ", a ' is read as a
+  // forgotten Shift: move past such a step first).
+  for (let g = 0; g < 10 && (await st(page)).run.next.keys[0] === '"'; g++) await followGuide(page, 'Control+b');
   await p("'");
   ok(/index/.test(await status()), L + " prefix → ' asks for an index");
   await page.keyboard.type('1'); await page.keyboard.press('Enter');
@@ -1313,8 +1321,8 @@ async function qa(browser) {
   await p('#');
   ok(/no buffers/.test(await status()), L + ' # with nothing copied says no buffers');
   await page.keyboard.type('echo hello-buffer'); await page.keyboard.press('Enter');
-  await p('['); await page.keyboard.press('Space'); await page.keyboard.press('Enter');
-  ok(/hello-buffer/.test((await st(page)).clipboard), L + ' Space, Enter copies the line');
+  await p('['); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Home'); await page.keyboard.press('Space'); await page.keyboard.press('End'); await page.keyboard.press('Enter');
+  ok((await st(page)).clipboard === 'hello-buffer', L + ' ↑, Home, Space, End, Enter copies the line above (' + JSON.stringify((await st(page)).clipboard) + ')');
   await p('#');
   ok(/buffer0000/.test(await status()), L + ' # lists it');
   await p('=');
@@ -1446,6 +1454,108 @@ async function qa(browser) {
   await c5.close();
 }
 
+// Round 2: Ctrl still held on a plain arrow and Shift forgotten are said,
+// not counted; copy mode copies as tmux does (the cursor starts on the
+// prompt, Space to the cursor); the result offers the next course after a
+// good run and says when the registration failed; weak spots wait for two runs.
+async function loop2(browser) {
+  const L = '[loop2]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  const status = () => page.$eval('#status', (e) => e.textContent);
+  const rect = () => page.evaluate(() => { const r = document.querySelector('.pane.active').getBoundingClientRect(); return [r.width, r.height].join('x'); });
+  // Follows the guide until `pred` holds of the state (or the run ends).
+  const walkTo = async (pred) => {
+    for (let g = 0; g < 300; g++) {
+      const s = await st(page);
+      if (!s.run || s.run.phase !== 'play') return null;
+      if (pred(s)) return s;
+      await followGuide(page, 'Control+b');
+    }
+    return null;
+  };
+
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  // 1: Ctrl+arrow where the guide wants a plain arrow: said, no resize, no miss.
+  let s = await walkTo((x) => x.run.next && x.run.next.pfx && /^[←→↑↓]$/.test(x.run.next.keys[0]));
+  if (s) {
+    const before = await rect();
+    await page.keyboard.press('Control+b'); await page.keyboard.press('Control+' + ARROW[s.run.next.keys[0]]);
+    const now = await st(page);
+    ok(now.run.misses === s.run.misses && now.activePane === s.activePane && (await rect()) === before && /Ctrl を離してから/.test(await status()),
+      L + ' Ctrl held on the arrow: said, the pane neither moves nor resizes, no miss (' + (await status()).slice(0, 50) + ')');
+  } else ok(false, L + ' no arrow step reached');
+  // 9: Shift forgotten: prefix → 5 when the guide wants %.
+  s = await walkTo((x) => x.run.next && x.run.next.pfx && x.run.next.keys[0] === '%');
+  if (s) {
+    await page.keyboard.press('Control+b'); await page.keyboard.press('5');
+    const now = await st(page);
+    ok(now.run.misses === s.run.misses && now.activeIndex === s.activeIndex && now.panes.length === s.panes.length && /Shift を押しながら 5/.test(await status()),
+      L + ' 5 for %: said, no window switch, no miss (' + (await status()).slice(0, 40) + ')');
+  } else ok(false, L + ' no % step reached');
+  await walkTo(() => false);
+  await waitResult(page, L);
+  // 7: a good first run offers the next course; N enters it.
+  const r = (await st(page)).result;
+  const up = await page.$('#result-body .cta [data-course="normal"]');
+  ok(r.misses === 0 && !!up && /中級へ進む/.test(await up.evaluate((e) => e.textContent)), L + ' the result offers 中級 after a clean run (' + r.rank + ')');
+  // 6: one run says nothing about weak spots yet.
+  ok(!(await page.$('#result-body [data-course="keiko"]')), L + ' no 苦手 after one run');
+  // 2: the name goes up but the run does not: the result says so, not a form that is gone.
+  await page.evaluate(() => {
+    ADV.net.setName = () => Promise.resolve();
+    ADV.net.sync = () => Promise.resolve();
+    ADV.net.submit = () => Promise.reject(new Error('offline'));
+  });
+  ok(!!(await page.$('#result-body .name-form')), L + ' the result asks for a name');
+  await page.fill('#result-body .name-form input', 'loop2');
+  await page.click('#result-body .name-form button[type="submit"]');
+  await page.waitForFunction(() => !/載せている/.test(document.querySelector('#result-body').textContent), null, { timeout: 3000 }).catch(() => {});
+  const body = await page.$eval('#result-body', (e) => e.textContent);
+  ok(!/載せている/.test(body) && /つながらなかった/.test(body), L + ' a failed registration is said on the result (' + (await st(page)).result.board.state + ')');
+  await page.waitForTimeout(800);
+  await page.keyboard.press('n');
+  await waitPlay(page);
+  ok((await st(page)).run.course === 'normal', L + ' N on the result enters 中級');
+  await page.click('.quit.to-title');
+  ok(await page.$eval('#btn-keiko', (e) => e.hidden), L + ' the title offers no 苦手 after one run');
+
+  // 3: copy mode as tmux. The old Space, Enter at the prompt copies nothing
+  // useful; the guide leads in seven moves.
+  await page.click('#course-list [data-course="hard"]');
+  await waitPlay(page);
+  s = await walkTo((x) => x.run.type === 'yank_paste');
+  if (s) {
+    const at = s.run.i;
+    await page.keyboard.press('Control+b'); await page.keyboard.press('[');
+    const c = (await st(page)).copyAt;
+    ok(c && c.ln === c.lines && c.col > 0, L + ' copy mode starts on the prompt line, after the prompt (' + JSON.stringify(c) + ')');
+    await page.keyboard.press('Space');
+    ok((await st(page)).run.next.keys[0] === 'Esc', L + ' a selection begun on the prompt: the guide says Esc first');
+    await page.keyboard.press('Enter');
+    const now = await st(page);
+    ok(now.run.i === at && !now.copyMode && !/デタッチしても/.test(now.clipboard), L + ' Space, Enter on the prompt does not copy the line above (' + JSON.stringify(now.clipboard) + ')');
+    ok(now.run.next.keys[0] === '[' && now.run.next.pfx, L + ' the guide starts over: ' + now.run.next.text);
+    const keys = [];
+    for (let k = 0; k < 12; k++) {
+      const x = await st(page);
+      if (x.run.i !== at) break;
+      keys.push((x.run.next.pfx ? 'prefix ' : '') + x.run.next.keys[0]);
+      await followGuide(page, 'Control+b');
+    }
+    const done = await st(page);
+    ok(done.run.i > at && done.run.misses === s.run.misses, L + ' the guide copies the line and pastes it: ' + keys.join(', '));
+    ok(keys.join(',') === 'prefix [,↑,Home,Space,End,Enter,prefix ]', L + ' in the seven moves of the 目安');
+    ok(/デタッチしても/.test(done.input), L + ' the pasted line is in the prompt');
+  } else ok(false, L + ' no yank_paste reached');
+  await page.click('.quit.to-title');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -1474,6 +1584,7 @@ const parts = [
   ['learning', learning],
   ['ux', uxScreens],
   ['longview', longView],
+  ['loop2', loop2],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
