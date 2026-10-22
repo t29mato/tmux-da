@@ -205,3 +205,15 @@ test('the 稽古の間 is a course for records (rank, par) with its own question
   assert.equal(s.par, 28);
   assert.equal(REC.courseOf('keiko').practice, true);
 });
+
+test('streak: days in a row (Japan time), alive until midnight even before today is played', () => {
+  const REC = fresh();
+  REC.add(run(40, { at: '2026-10-19T03:00:00Z' }));
+  REC.add(run(40, { at: '2026-10-20T03:00:00Z' }));
+  REC.add(run(40, { at: '2026-10-21T03:00:00Z' }));
+  REC.add({ ...run(18), course: 'keiko', n: 9, qs: [], at: '2026-10-22T03:00:00Z' }); // practice does not count
+  assert.deepEqual(plain(REC.streak(null, new Date('2026-10-22T05:00:00Z'))), { days: 3, today: false });
+  REC.add(run(39, { at: '2026-10-22T04:00:00Z' }));
+  assert.deepEqual(plain(REC.streak(null, new Date('2026-10-22T05:00:00Z'))), { days: 4, today: true });
+  assert.deepEqual(plain(REC.streak(null, new Date('2026-10-24T05:00:00Z'))), { days: 0, today: false });
+});
