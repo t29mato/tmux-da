@@ -18,16 +18,46 @@ test('course ids stay easy / normal / hard so old records carry over', () => {
 });
 
 test('rankFor: thresholds by seconds per question, scaled by rankMul', () => {
-  assert.equal(LV.rankFor(1.6), '師範');
-  assert.equal(LV.rankFor(1.61), '師範代');
-  assert.equal(LV.rankFor(5), '初段');
+  assert.equal(LV.rankFor(2), '師範');
+  assert.equal(LV.rankFor(2.01), '師範代');
+  assert.equal(LV.rankFor(3), '師範代');
+  assert.equal(LV.rankFor(5), '三段');
+  assert.equal(LV.rankFor(8), '初段');
+  assert.equal(LV.rankFor(8.01), '見習い');
   assert.equal(LV.rankFor(99), '見習い');
-  assert.equal(LV.rankFor(3.2, 2), '師範', 'a hard question may take twice as long');
+  assert.equal(LV.rankFor(3.2, 1.6), '師範', 'a hard question may take 1.6 times as long');
 });
 
-test('par (当主の刻) is からくり師 pace on every question', () => {
-  assert.deepEqual(plain(LV.COURSES.map((c) => LV.par(c))), [36, 62, 77]);
-  assert.equal(LV.par(LV.KEIKO, 9), 28, 'the 稽古の間 counts the questions it picked');
+test('rankMul: the same hands land on about the same Lv and title on every course', () => {
+  // Seconds per question the reviewer's simulation gives one player model
+  // (read + one move) on each course, following the guide: 入門 1.35 moves
+  // a question, 中級 1.71, 上級 2.87.
+  const mul = Object.fromEntries(LV.COURSES.map((c) => [c.id, c.rankMul]));
+  const models = [
+    { easy: 5.20, normal: 6.06, hard: 8.23 }, // 初心者
+    { easy: 2.28, normal: 2.72, hard: 3.49 }, // 中級
+    { easy: 1.04, normal: 1.33, hard: 1.65 } // 上級
+  ];
+  for (const m of models) {
+    const lvs = ['easy', 'normal', 'hard'].map((id) => LV.levelFor(m[id] / mul[id]));
+    assert.ok(Math.max(...lvs) - Math.min(...lvs) <= 1, JSON.stringify(m) + ' → Lv ' + lvs.join('/'));
+    const idx = ['easy', 'normal', 'hard'].map((id) => LV.RANKS.findIndex((r) => r.title === LV.rankFor(m[id], mul[id])));
+    assert.ok(Math.max(...idx) - Math.min(...idx) <= 1, JSON.stringify(m) + ' → titles ' + idx.join('/'));
+  }
+  assert.equal(LV.levelFor(5.2), 9, 'a beginner reading the 手順 is well off Lv 1');
+});
+
+test('par (お手本) is 師範代 pace on every question', () => {
+  assert.deepEqual(plain(LV.COURSES.map((c) => LV.par(c))), [45, 75, 77]);
+  assert.equal(LV.par(LV.KEIKO, 9), 35, 'the 稽古の間 counts the questions it picked');
+});
+
+test('limitFor: the 目安 grows with the moves a question takes, two when unknown', () => {
+  assert.equal(LV.limitFor(1), 7);
+  assert.equal(LV.limitFor(2), 10);
+  assert.equal(LV.limitFor(4), 16);
+  assert.equal(LV.limitFor(8), 28);
+  assert.equal(LV.limitFor(undefined), LV.limitFor(LV.STEPS_DEFAULT));
 });
 
 test('every old rank title maps to a current one', () => {
@@ -45,13 +75,13 @@ test('resize keys show as Option+arrows on a Mac', () => {
   assert.ok(JSON.stringify(mac.KEYS).includes('Option') || JSON.stringify(mac.KEYS) !== JSON.stringify(LV.KEYS));
 });
 
-test('腕前: Lv 1 at 6 秒 per question, Lv 30 at 1.2 秒, monotonic, and paceFor inverts levelFor', () => {
-  assert.equal(LV.levelFor(6), 1);
+test('腕前: Lv 1 at 10 秒 per question, Lv 30 at 1.2 秒, monotonic, and paceFor inverts levelFor', () => {
+  assert.equal(LV.levelFor(10), 1);
   assert.equal(LV.levelFor(20), 1);
   assert.equal(LV.levelFor(1.2), 30);
   assert.equal(LV.levelFor(0.5), 30);
   let prev = 0;
-  for (let p = 6; p >= 1.2; p -= 0.05) { const lv = LV.levelFor(p); assert.ok(lv >= prev); prev = lv; }
+  for (let p = 10; p >= 1.2; p -= 0.05) { const lv = LV.levelFor(p); assert.ok(lv >= prev); prev = lv; }
   for (let lv = 1; lv <= 30; lv++) assert.equal(LV.levelFor(LV.paceFor(lv)), lv, 'Lv ' + lv);
 });
 

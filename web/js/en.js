@@ -18,7 +18,7 @@ window.ADV.EN = {
   "-L（左）-R（右）-U（上）-D（下）": "-L (left) -R (right) -U (up) -D (down)",
   "1 問 {0} 秒": "{0}s per question",
   "1 問あたり": "Per question",
-  "1 問で 2〜3 手。考える前に手が動くか。": "Two or three moves per question. Can your hands go before you think?",
+  "1 問で 2〜8 手。考える前に手が動くか。": "Two to eight moves per question. Can your hands go before you think?",
   "2 つ目の prefix を {0} にする": "second prefix becomes {0}",
   "2 つ目の prefix をなくす": "no second prefix",
   "2 回入ると、苦手な問題が見えてくる。": "After two runs, your weak spots show here.",
@@ -313,7 +313,7 @@ window.ADV.EN = {
   "全画面中は大きさを変えられない（z で戻す）": "A zoomed pane cannot be resized (z to unzoom)",
   "内訳": "Details",
   "写す": "Copy",
-  "分割・移動・全画面・閉じる・ウィンドウの作成と切り替え。1 問 1〜3 手。": "Split, move, zoom, close, make and switch windows. One to three keys per question.",
+  "分割・移動・全画面・閉じる・ウィンドウの作成と切り替え。1 問 1〜5 手（閉じるは移動も入る）。": "Split, move, zoom, close, make and switch windows. One to five moves per question (closing includes the walk there).",
   "初段": "Shodan",
   "別のファイルやシェルはゲームでは読めない": "The game cannot read other files or run shells",
   "別の端末でこの合言葉を入れると、同じ記録が見られる。他の人には教えない。": "Enter this sync key on another device to see the same records. Keep it to yourself.",
@@ -348,7 +348,7 @@ window.ADV.EN = {
   "境目を{0}へ{1}マスずらす": "move the border {0} by {1}",
   "変える": "Change",
   "外からは tmux new -s 名前。中からなら prefix → : で new -s 名前。": "Outside: tmux new -s NAME. Inside: prefix → : then new -s NAME.",
-  "大きさ・名前・入れ替え・ウィンドウを閉じる・スクロールも混ざる。": "Adds resize, rename, swap, closing windows and scrolling.",
+  "大きさ・名前・入れ替え・ウィンドウを閉じる・スクロールも混ざる。1 問 1〜5 手。": "Adds resize, rename, swap, closing windows and scrolling. One to five moves per question.",
   "大きさ変更": "Resize",
   "奥の間に辿り着いた。": "Course cleared.",
   "始め": "Go",
@@ -420,7 +420,6 @@ window.ADV.EN = {
   "画面上のキー": "On-screen keys",
   "目安": "Target",
   "目安 {0} 秒": "Target {0}s",
-  "目安 {0} 秒／問。": "Target {0}s per question. ",
   "目安を超えがちな問題": "Questions often over target",
   "目安を超えがちな問題だけを三度ずつ。": "Only the questions you are slow at, three times each.",
   "目安を超えがちな問題（直近 {0} 回）": "Questions often over target (last {0} runs)",
@@ -498,5 +497,11 @@ window.ADV.EN = {
   "（合図 {0}）": " (prefix {0})",
   "（次から手順を畳む）": " (steps fold from now on)",
   "（直近 {0} 回の平均 {1} 秒／問）": " (last {0} runs: {1}s per question)",
-  "（続けて押せる）": " (repeatable)"
+  "（続けて押せる）": " (repeatable)",
+  // --- balance ---
+  "目安は 1 問 {0}〜{1} 秒。": "Target {0}–{1}s per question. ",
+  "途中で {0} 秒 止まっていたので、今日のランキングには載せない（記録には残る）。": "The clock stood still for {0}s, so this run is not sent to today's ranking (it is kept in your records).",
+  "順番を変えた回は、今日のランキングには載せない（記録には残る）。": "A run in a changed order is not sent to today's ranking (it is kept in your records).",
+  "順番を変えて": "Change the order",
+  "目安を超えがちな問題はない。": "No question runs past its target."
 };
