@@ -354,7 +354,7 @@ window.ADV.EN = {
   "師範": "Shihan",
   "師範代": "Shihan-dai",
   "平均 {0}秒": "avg {0}s",
-  "平均 {0}秒 ・ 違い {1}%": "avg {0}s · wrong {1}%",
+  "平均 {0}秒 ・ 押し違い {1}%": "avg {0}s · wrong key {1}%",
   "引き継ぎ": "Sync",
   "形が変わったので、このペインからやり直す": "The shape changed, so start again from this pane",
   "形が違う。x → y でペインを閉じて、% → \" の順にやり直す": "Wrong shape. Close the pane with x → y, then do % → \" again",

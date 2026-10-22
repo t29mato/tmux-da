@@ -3867,7 +3867,7 @@
       var keys = [];
       q.show.forEach(function (a) { (LV.KEYS[a] || []).forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); }); });
       return '<li><span class="w-text">' + esc(tx(q.text)) + '</span>' +
-        '<span class="w-num">' + tx('平均 {0}秒 ・ 違い {1}%', e.avg.toFixed(1), Math.round(e.missRate * 100)) + (e.overs ? tx(' ・ 目安超え {0}', e.overs) : '') + '</span>' +
+        '<span class="w-num">' + tx('平均 {0}秒 ・ 押し違い {1}%', e.avg.toFixed(1), Math.round(e.missRate * 100)) + (e.overs ? tx(' ・ 目安超え {0}', e.overs) : '') + '</span>' +
         '<span class="w-keys"><kbd class="pfx">' + esc(prefixLabel()) + '</kbd><span class="arr">→</span>' + keycaps(keys) + '</span>' +
         // The tip where it is wanted: on the question that keeps running over.
         (tipsOf(e.type).length ? '<span class="w-tip">' + esc(tipsOf(e.type)[0]) + '</span>' : '') + '</li>';
