@@ -873,3 +873,6 @@ body[data-armed="1"] .yashiki .term { box-shadow: none; }
 .here-tag { white-space: nowrap; }
 /* a phone: the window list needs the whole bar; the host and clock step aside */
 @media (max-width: 700px) { .yashiki .st-host, .yashiki .st-clock { display: none; } }
+/* display-panes (prefix → q): the pane numbers, big, for a second */
+#term > .dp-num { position: absolute; z-index: 8; display: flex; align-items: center; justify-content: center; pointer-events: none; font-family: var(--mono); font-size: 56px; font-weight: 700; color: #fff; text-shadow: 0 0 8px #000, 0 0 2px #000; }
+#term > .dp-num.active { color: var(--andon-2); }
