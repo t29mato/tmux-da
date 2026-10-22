@@ -1521,7 +1521,10 @@
     // kill-pane with no confirm-before: it closes at once.
     if (o.now) text = text.replace(/（確認が出る）| \(it asks to confirm\)/, tx('（すぐ閉じる）'));
     if (o.root) text += tx('（prefix なし）');
-    return { pfx: o.pfx, keys: [o.label], text: text };
+    var own = { pfx: o.pfx, keys: [o.label], text: text };
+    // What the move works inside (a prompt, a list) stays on it.
+    ['prompt', 'picker', 'type'].forEach(function (f) { if (m[f] != null) own[f] = m[f]; });
+    return own;
   }
 
   // The move the 手順 shows now, in the player's keys.
