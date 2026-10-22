@@ -141,6 +141,13 @@ async function solve(page, prefix, prefixOpt) {
       await p('&'); await page.keyboard.press('y');
       break;
     case 'copy_top': await p('['); await page.keyboard.press('g'); await page.keyboard.press('q'); break;
+    case 'copy_page':
+      await p('[');
+      for (let i = 0; i < 8 && (await st(page)).run && (await st(page)).run.i === s.run.i; i++) await page.keyboard.press('PageUp');
+      break;
+    case 'copy_search': await p('['); await page.keyboard.press('?'); await page.keyboard.type(s.run.goal); await page.keyboard.press('Enter'); break;
+    case 'last_window': await p('l'); break;
+    case 'break_pane': await p('!'); break;
     case 'find_zoom': await goTo(page, prefix); await p('z'); break;
     case 'trident': await p('%'); await p('"'); break;
     case 'two_akima':
@@ -982,7 +989,8 @@ async function learning(browser) {
   await page.reload();
   ok(/Lv\.\d+/.test(await page.$eval('#skill', (e) => e.textContent)), L + ' the title shows the 腕前: ' + (await page.$eval('#skill .sk-row', (e) => e.textContent)));
   ok(/腕前 Lv\.\d+/.test(await page.$eval('#title-meta', (e) => e.textContent)), L + ' the top bar shows the 腕前');
-  ok(await page.$eval('#btn-keiko', (e) => !e.hidden && /大きさ変更/.test(e.textContent)), L + ' the 稽古の間 offers the weak type');
+  ok(await page.$eval('#btn-keiko', (e) => !e.hidden && /稽古/.test(e.textContent)), L + ' the title offers the 稽古');
+  ok((await page.evaluate(() => ADV.records.weakTypes(3))).join() === 'resize', L + ' resize is the weak type');
   await shot(page, 'title-skill');
 
   // Keyboard: 1 enters the first house.
@@ -1013,15 +1021,19 @@ async function learning(browser) {
   await page.click('.detail-toggle');
   await page.click('.quit.to-title');
 
-  // The 稽古の間 from the keyboard: K.
+  // The 稽古 (drill) from the keyboard: K. Its questions come one at a
+  // time with the 手順 folded; it goes on until the player stops.
   await page.keyboard.press('k');
   await waitPlay(page);
   s = await st(page);
-  // Only 'resize' is weak (the rest were within half their 目安): three questions of it.
-  ok(s.run.course === 'keiko' && s.run.n === 3 && s.run.qs.every((t) => t === 'resize'), L + ' K enters the 稽古の間: three questions of the one weak type (' + s.run.qs.join(',') + ')');
-  await playCourse(page, 'Control+b', 'C-b', L + ' keiko', 'guide');
+  ok(s.run.course === 'keiko' && s.run.drill && s.run.n === 1 && s.run.folded, L + ' K enters the 稽古: one question at a time, the 手順 folded (' + s.run.qs.join(',') + ')');
+  for (let k = 0; k < 3; k++) {
+    const at = (await st(page)).run.i;
+    for (let g = 0; g < 12 && (await st(page)).run.i === at; g++) await followGuide(page, 'Control+b');
+  }
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
   await waitResult(page, L + ' keiko');
-  ok(/苦手の稽古 \d+ 問、解き終わった/.test(await page.$eval('#result-body .em-title', (e) => e.textContent)), L + ' the 稽古 result says so');
+  ok(/稽古 3 問/.test(await page.$eval('#result-body .em-title', (e) => e.textContent)), L + ' Esc twice ends the 稽古 on its result');
   ok(!(await page.$('#result-body .name-form')), L + ' a 稽古 run is not offered for the boards');
   // Enter right away (a key held from the last question) does nothing; then it replays.
   await page.keyboard.press('Enter');
@@ -1502,8 +1514,8 @@ async function loop2(browser) {
   const r = (await st(page)).result;
   const up = await page.$('#result-body .cta [data-course="normal"]');
   ok(r.misses === 0 && !!up && /中級へ進む/.test(await up.evaluate((e) => e.textContent)), L + ' the result offers 中級 after a clean run (' + r.rank + ')');
-  // 6: one run says nothing about weak spots yet.
-  ok(!(await page.$('#result-body [data-course="keiko"]')), L + ' no 苦手 after one run');
+  // 6: the 稽古 (drill) is offered after any run (it weighs weak spots itself).
+  ok(!!(await page.$('#result-body [data-course="keiko"]')), L + ' the result offers the 稽古');
   // 2: the name goes up but the run does not: the result says so, not a form that is gone.
   await page.evaluate(() => {
     ADV.net.setName = () => Promise.resolve();
@@ -1521,7 +1533,7 @@ async function loop2(browser) {
   await waitPlay(page);
   ok((await st(page)).run.course === 'normal', L + ' N on the result enters 中級');
   await page.click('.quit.to-title');
-  ok(await page.$eval('#btn-keiko', (e) => e.hidden), L + ' the title offers no 苦手 after one run');
+  ok(await page.$eval('#btn-keiko', (e) => !e.hidden && /稽古/.test(e.textContent)), L + ' the title offers the 稽古');
 
   // 3: copy mode as tmux. The old Space, Enter at the prompt copies nothing
   // useful; the guide leads in seven moves.
@@ -1622,6 +1634,238 @@ async function loop3(browser) {
   await ctx.close();
 }
 
+
+// Round 5: the four new skills (last_window, break_pane, copy_page,
+// copy_search) from the guide and after slips, and the 稽古 drill: folded
+// steps that come out after PEEK_AFTER or a wrong key, no type twice in a
+// row, the streak, the result on quitting, a chosen count, the records.
+async function loop5(browser) {
+  const L = '[loop5]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  const walkTo = async (pred) => {
+    for (let g = 0; g < 300; g++) {
+      const s = await st(page);
+      if (!s.run || s.run.phase !== 'play') return null;
+      if (pred(s)) return s;
+      await followGuide(page, 'Control+b');
+    }
+    return null;
+  };
+  // The keys the guide asks for until the question on screen is solved.
+  const guideKeys = async (max = 12) => {
+    const at = (await st(page)).run.i, keys = [];
+    for (let k = 0; k < max; k++) {
+      const x = await st(page);
+      if (!x.run || x.run.i !== at) break;
+      keys.push((x.run.next.pfx ? 'prefix ' : '') + (x.run.next.keys[0] || x.run.next.type));
+      await followGuide(page, 'Control+b');
+    }
+    return keys;
+  };
+  const statusText = () => page.$eval('#status', (e) => e.textContent);
+
+  // Plays the course from the guide; at a question of a type in `on`, its
+  // check runs instead (once). Returns the types whose check never ran.
+  const playWith = async (on) => {
+    const left = new Set(Object.keys(on));
+    for (let g = 0; g < 400 && left.size; g++) {
+      const s = await st(page);
+      if (!s.run || s.run.phase !== 'play') break;
+      if (left.has(s.run.type)) { left.delete(s.run.type); await on[s.run.type](s); continue; }
+      await followGuide(page, 'Control+b');
+    }
+    return [...left];
+  };
+  const quit = async () => {
+    const s = await st(page);
+    if (s.screen === 'game') await page.click('.quit.to-title');
+    else if (s.screen === 'result') await page.click('#result-body [data-title]');
+  };
+
+  // ---- 中級: last_window, break_pane, copy_page ----
+  await page.click('#course-list [data-course="normal"]');
+  await waitPlay(page);
+  let left = await playWith({
+    last_window: async (s) => {
+      const at = s.run.i, goal = s.run.goal;
+      ok(s.run.next.keys[0] === 'l' && s.run.next.pfx && /ここへ戻る/.test(await page.$eval('#status .goal-tab', (e) => e.textContent)), L + ' last_window: the guide says prefix → l and the tab is marked');
+      const marked = await page.$eval('#status', (e) => e.textContent);
+      ok(new RegExp(goal.index + ':' + goal.name + '-').test(marked), L + ' the last window carries - in the status bar (' + marked.replace(/\s+/g, ' ').slice(0, 40) + ')');
+      await page.keyboard.press('Control+b'); await page.keyboard.press('l');
+      const now = await st(page);
+      ok(now.run.i > at && now.run.misses === s.run.misses, L + ' prefix → l solves it with no miss');
+      ok(!/l は直前の/.test(await statusText()), L + ' no "l は直前のウィンドウへ" warning when l was asked for');
+    },
+    break_pane: async (s) => {
+      const at = s.run.i, pane = s.activePane, wins = s.windows.length;
+      ok(s.run.next.keys[0] === '!' && s.run.goals === 2, L + ' break_pane: the guide says prefix → ! and marks the pane and a new tab');
+      // A slip to another window: the guide leads back to the pane first.
+      const other = s.windows.find((x) => !x.active).index;
+      await page.keyboard.press('Control+b'); await page.keyboard.press(String(other));
+      let now = await st(page);
+      ok(now.activeIndex === other && now.run.next.keys[0] === String(s.activeIndex) && now.run.misses === s.run.misses, L + ' from another window the guide says the number of the pane\'s window first');
+      await followGuide(page, 'Control+b');
+      now = await st(page);
+      ok(now.activeIndex === s.activeIndex && now.activePane === pane && now.run.next.keys[0] === '!', L + ' back in the window the guide says ! again');
+      await page.keyboard.press('Control+b'); await page.keyboard.press('!');
+      // The house as the key left it, before the next question's setup touches it.
+      now = await st(page, true);
+      const w = now.windows.find((x) => x.active);
+      ok(now.run.i === at && now.run.phase === 'clear' && now.windows.length === wins + 1 && now.activePane === pane && w.panes === 1 && now.run.misses === s.run.misses,
+        L + ' ! moves the pane into a new window of its own and goes there (' + now.windows.map((x) => x.index + ':' + x.name + '/' + x.panes).join(' ') + ')');
+      ok(now.windows.find((x) => x.index === s.activeIndex).panes === s.panes.length - 1, L + ' the window it left keeps its other panes');
+    },
+    copy_page: async (s) => {
+      const at = s.run.i;
+      // Overshoot first (g, to the very top): the guide turns round.
+      await page.keyboard.press('Control+b'); await page.keyboard.press('[');
+      await page.keyboard.press('g');
+      let now = await st(page);
+      ok(now.run.i === at && now.copyMode && now.run.next.keys[0] === 'PageDown', L + ' at the very top the mark is below: the guide says PageDown (' + (now.run.next && now.run.next.keys[0]) + ')');
+      const keys = await guideKeys();
+      now = await st(page);
+      ok(now.run.i > at && now.run.misses === s.run.misses, L + ' PageDown brings the mark back into view: ' + keys.join(','));
+      ok(keys.every((k) => k === 'PageDown'), L + ' only PageDown was needed');
+    }
+  });
+  ok(!left.length, L + ' 中級 asked every new type' + (left.length ? ' but ' + left.join(',') : ''));
+  await quit();
+  // copy_page from the start: [ then three PageUp.
+  await page.click('#course-list [data-course="normal"]');
+  await waitPlay(page);
+  left = await playWith({
+    copy_page: async (s) => {
+      const at = s.run.i;
+      ok(await page.$eval('#term .pane.active', (e) => /★/.test(e.textContent)), L + ' the mark line is printed in the pane');
+      const keys = await guideKeys();
+      const now = await st(page);
+      ok(now.run.i > at && keys.join(',') === 'prefix [,PageUp,PageUp,PageUp', L + ' the mark is three pages up: ' + keys.join(','));
+    }
+  });
+  ok(!left.length, L + ' 中級 asked copy_page again');
+  await quit();
+
+  // ---- 上級: copy_search ----
+  await page.click('#course-list [data-course="hard"]');
+  await waitPlay(page);
+  left = await playWith({
+    copy_search: async (s) => {
+      const at = s.run.i, word = s.run.goal;
+      ok(/^(ERROR|WARN|FATAL|panic)$/.test(word) && new RegExp('ログの中の ' + word).test(s.run.order), L + ' copy_search asks for a word: ' + s.run.order);
+      // A slip: / (search down) instead of ?; the search wraps and the guide types the word.
+      await page.keyboard.press('Control+b'); await page.keyboard.press('[');
+      await page.keyboard.press('/');
+      let now = await st(page);
+      ok(now.run.next.type === word && !now.run.next.keys.length, L + ' in the search prompt the guide says to type the word: ' + now.run.next.text);
+      await page.keyboard.type(word); await page.keyboard.press('Enter');
+      now = await st(page);
+      ok(now.run.i > at && now.run.misses === s.run.misses, L + ' /word finds the line too (the search wraps), no miss');
+    }
+  });
+  ok(!left.length, L + ' 上級 asked copy_search');
+  await quit();
+  await page.click('#course-list [data-course="hard"]');
+  await waitPlay(page);
+  left = await playWith({
+    copy_search: async (s) => {
+      const at = s.run.i;
+      const keys = await guideKeys();
+      const now = await st(page);
+      ok(now.run.i > at && keys.join(',') === 'prefix [,?,' + s.run.goal, L + ' from the guide: [, ?, the word, Enter (' + keys.join(',') + ')');
+    }
+  });
+  ok(!left.length, L + ' 上級 asked copy_search again');
+  await quit();
+
+  // ---- the 稽古 drill ----
+  ok(await page.$eval('#btn-keiko', (e) => !e.hidden && /稽古/.test(e.textContent) && /手順なしで思い出す/.test(e.textContent)), L + ' the title offers the 稽古 to everyone');
+  await page.keyboard.press('k');
+  await waitPlay(page);
+  let s = await st(page);
+  ok(s.run.course === 'keiko' && s.run.drill && s.run.folded && !s.run.peek, L + ' K starts the drill with the 手順 folded');
+  ok(!(await page.$('#sashizu .shinan')) && !(await page.$('#term .motd kbd.next')) && !!(await page.$('#term .motd .ob-guide.learnt')), L + ' no steps, no lit keys, a 稽古 note');
+  ok(/^問題\s*1$/.test((await page.$eval('#playbar .pb-course', (e) => e.textContent)).replace(/^.*・\s*/, '').trim()), L + ' the drill counts up without a total (' + (await page.$eval('#playbar .pb-course', (e) => e.textContent)) + ')');
+  await shot(page, 'loop5-drill-folded');
+  // 1: after PEEK_AFTER the steps come out and the question is marked.
+  const peekAfter = await page.evaluate(() => ADV.levels.PEEK_AFTER);
+  await page.waitForTimeout(peekAfter * 1000 + 400);
+  s = await st(page);
+  ok(s.run.peek && !s.run.folded && !!(await page.$('#term .motd kbd.next')), L + ' after ' + peekAfter + ' s the steps are out');
+  await shot(page, 'loop5-drill-peeked');
+  const types = [s.run.type];
+  let at = s.run.i;
+  await guideKeys();
+  // 2: a wrong key brings the steps out at once.
+  s = await st(page);
+  ok(s.run.i === at + 1 && s.run.folded, L + ' the next question is folded again');
+  types.push(s.run.type);
+  await page.keyboard.press('Control+b'); await page.keyboard.press('Y');
+  s = await st(page);
+  ok(s.run.misses === 1 && s.run.peek && !s.run.folded && !!(await page.$('#term .motd kbd.next')), L + ' a wrong key brings the steps out at once');
+  at = s.run.i;
+  await guideKeys();
+  // 3: solved from memory (the solver, without waiting): the streak counts.
+  for (let k = 0; k < 6; k++) {
+    s = await st(page);
+    ok(s.run.folded && s.run.i === at + 1, L + ' question ' + (s.run.i + 1) + ' (' + s.run.type + ') starts folded');
+    types.push(s.run.type);
+    at = s.run.i;
+    await solve(page, 'Control+b', 'C-b');
+    await page.waitForFunction((i) => { const r = window.tmuxDa.state().run; return r && r.i !== i; }, at, { timeout: 8000 }).catch(() => {});
+  }
+  s = await st(page);
+  ok(s.run.i === at + 1 && s.run.streak >= 6, L + ' six solved from memory in a row (streak ' + s.run.streak + ', misses ' + s.run.misses + ')');
+  for (let k = 0; k < 6; k++) { types.push((await st(page)).run.type); await guideKeys(); }
+  ok(types.every((t, i) => !i || t !== types[i - 1]), L + ' never the same type twice in a row: ' + types.join(','));
+  ok(new Set(types).size >= 5, L + ' a mix of types (' + new Set(types).size + ' kinds in ' + types.length + ')');
+  // 4: quitting shows the result: the streak, per-type results, what to drill next.
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  await waitResult(page, L + ' drill');
+  const r = (await st(page)).result;
+  ok(r.drill && r.n === types.length && r.misses === 1 && r.guides >= 2, L + ' the result counts the solved questions (' + r.n + '), the miss and the peeks (' + r.guides + ')');
+  ok(r.bestStreak >= 6 && r.qlog[0].g === 1 && r.qlog[1].m === 1, L + ' the best streak is ' + r.bestStreak + '; the peek and the miss are on their questions');
+  const body = await page.$eval('#result-body', (e) => e.textContent);
+  ok(/問連続/.test(body) && /問題ごと/.test(body) && /次に鍛える/.test(body) && /10 問だけ/.test(body), L + ' the result shows the streak, the per-type table and what to drill next');
+  ok(!/お手本|称号|ランキング/.test(body) && !(await page.$('#result-body .name-form')), L + ' no お手本, rank or ranking: practice');
+  ok(await page.$$eval('#result-body .em-types tbody tr', (e) => e.length) === new Set(types).size, L + ' one row per type');
+  await shot(page, 'loop5-drill-result');
+  const db = await page.evaluate(() => window.tmuxDa.records());
+  const run = db.runs[db.runs.length - 1];
+  ok(run.course === 'keiko' && run.drill === true && run.n === types.length && run.qs.length === types.length, L + ' the run is kept as a drill with its questions');
+  ok(await page.evaluate(() => ADV.records.drillBest()) === r.bestStreak, L + ' the records keep the best streak');
+  // 5: a chosen count ends on its own.
+  await page.waitForTimeout(800);
+  await page.click('#result-body [data-course="keiko"][data-n="10"]');
+  await waitPlay(page);
+  s = await st(page);
+  ok(s.run.target === 10 && /1 \/ 10/.test(await page.$eval('#playbar .pb-course', (e) => e.textContent)), L + ' 10 問だけ counts 1 / 10');
+  for (let k = 0; k < 10; k++) { const x = await st(page); if (!x.run) break; await guideKeys(); }
+  await waitResult(page, L + ' drill of 10');
+  ok((await st(page)).result.n === 10, L + ' the drill of 10 ends by itself');
+  // 6: the records and the title show the best streak.
+  await page.waitForTimeout(800);
+  await page.keyboard.press('r');
+  await page.waitForFunction(() => document.body.dataset.screen === 'records');
+  const panel = await page.$eval('#records-body .rec-drill', (e) => e.textContent).catch(() => '');
+  ok(/最長 \d+ 問/.test(panel) && /2 回/.test(panel), L + ' the records show the drill: ' + panel.slice(0, 60));
+  await shot(page, 'loop5-records-drill');
+  await page.keyboard.press('Escape');
+  ok((await st(page)).screen === 'result', L + ' Esc goes back to the result');
+  await page.keyboard.press('Escape');
+  ok((await st(page)).screen === 'title', L + ' Esc again goes to the title');
+  ok(/最長 \d+ 問連続/.test(await page.$eval('#keiko-sub', (e) => e.textContent)), L + ' the title button shows the best streak: ' + (await page.$eval('#keiko-sub', (e) => e.textContent)));
+  // 7: nothing solved: Esc twice is a plain quit.
+  await page.keyboard.press('k');
+  await waitPlay(page);
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  ok((await st(page)).screen === 'title', L + ' quitting with nothing solved goes to the title');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -1652,6 +1896,7 @@ const parts = [
   ['longview', longView],
   ['loop2', loop2],
   ['loop3', loop3],
+  ['loop5', loop5],
   ['sound', sound]
 ];
 const browser = await chromium.launch();

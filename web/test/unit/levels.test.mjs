@@ -95,3 +95,20 @@ test('the 稽古の間 is not a house: never on the boards, not among the course
   assert.ok(!LV.COURSES.some((c) => c.id === LV.KEIKO.id));
   assert.equal(SERVER_COURSES[LV.KEIKO.id], undefined);
 });
+
+test('the new skills are in the courses, with the counts the server knows', () => {
+  const normal = LV.COURSES[1].qs, hard = LV.COURSES[2].qs;
+  for (const t of ['copy_page', 'last_window', 'break_pane']) assert.ok(normal.includes(t), t + ' in 中級');
+  assert.ok(hard.includes('copy_search'), 'copy_search in 上級');
+  assert.equal(normal.length, 20);
+  assert.equal(hard.length, 16);
+});
+
+test('the 稽古 is a drill: practice, no fixed questions, every frequent key weighs 3', () => {
+  assert.equal(LV.KEIKO.drill, true);
+  assert.equal(LV.KEIKO.practice, true);
+  assert.deepEqual(plain(LV.KEIKO.qs), []);
+  for (const t of ['focus', 'split_lr', 'zoom', 'new_window', 'select_window', 'last_window', 'copy_search', 'close', 'detach_attach']) assert.equal(LV.DRILL_FREQ[t], 3, t);
+  for (const t of ['resize', 'rename', 'swap', 'kill_window', 'break_pane']) assert.equal(LV.DRILL_FREQ[t], 2, t);
+  for (const t of ['trident', 'two_akima', 'yank_paste', 'swap_zoom']) assert.equal(LV.DRILL_FREQ[t], 1, t);
+});

@@ -99,3 +99,23 @@ test('neighbour: noWrap stops at the edge (the 指南 never points round it)', (
   assert.equal(go(h.win, 'D', true), null);
   assert.equal(go(h.win, 'L', true), h.left);
 });
+
+test('breakPane: the pane leaves for a window of its own, which becomes current; one pane cannot be broken', () => {
+  const s = T.createSession({ name: 't', baseIndex: 0, paneBaseIndex: 0 });
+  const w0 = T.createWindow(s, 'main');
+  T.selectWindow(s, w0.id);
+  const left = w0.active;
+  const right = T.splitPane(w0, left, 'lr', null, false).id;
+  w0.zoomed = true;
+  const fresh = T.breakPane(s, w0, right);
+  assert.ok(fresh && fresh.id !== w0.id);
+  assert.equal(s.active, fresh.id, 'the new window is current');
+  assert.equal(s.last, w0.id);
+  assert.deepEqual(plain(T.panesOf(fresh).map((p) => p.id)), [right]);
+  assert.deepEqual(plain(T.panesOf(w0).map((p) => p.id)), [left], 'the source window keeps its other pane');
+  assert.equal(w0.active, left);
+  assert.equal(w0.zoomed, false, 'the zoom is cleared');
+  assert.equal(fresh.index, 1);
+  assert.equal(T.breakPane(s, fresh, right), null, 'a window of one pane stays as it is');
+  assert.equal(s.windows.length, 2);
+});
