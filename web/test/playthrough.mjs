@@ -681,7 +681,8 @@ async function records(browser) {
   ok((await st(page)).screen === 'records' && (await st(page)).recCourse === 'easy', L + ' 絵巻を開く opens the easy history');
   ok(await page.$$eval('#rec-chart .bar', (e) => e.length) === 2, L + ' the chart has a bar per run');
   ok(await page.$$eval('#rec-chart .bar.rec', (e) => e.length) >= 1, L + ' record runs are marked on the chart');
-  ok(await page.$$eval('.rec-table tbody tr', (e) => e.length) === 2, L + ' the table lists both runs');
+  ok(await page.$$eval('.rec-panel:not(.rec-ranks) .rec-table tbody tr', (e) => e.length) === 2, L + ' the table lists both runs');
+  ok(await page.$$eval('.rec-ranks tbody tr', (e) => e.length) === 5, L + ' the list of titles has all five');
   ok(await page.$$eval('.weak-list li', (e) => e.length) >= 1, L + ' two runs are enough for the weakness panel');
   await shot(page, 'records-desktop');
   await page.click('[data-rec-course="hard"]');
