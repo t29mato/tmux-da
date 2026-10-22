@@ -161,6 +161,7 @@ async function followGuide(page, prefix) {
   const mv = s.run.next;
   if (!mv) return false;
   if (mv.pfx) await page.keyboard.press(prefix);
+  if (mv.type) { await page.keyboard.type(mv.type); await page.keyboard.press('Enter'); return true; }
   if (!mv.keys.length) {
     // The rename prompt: written as words, with the name the order asks for.
     await page.keyboard.press('Control+u'); await page.keyboard.type(s.run.goal); await page.keyboard.press('Enter');
@@ -173,7 +174,7 @@ async function followGuide(page, prefix) {
   else if ((m = /^(Ctrl|Option)\+(.)$/.exec(label))) {
     const key = (m[1] === 'Ctrl' ? 'Control+' : 'Alt+') + ARROW[m[2]];
     for (let i = 0; i < (m[1] === 'Ctrl' ? 6 : 1); i++) await page.keyboard.press(key);
-  } else await page.keyboard.press(ARROW[label] || label);
+  } else await page.keyboard.press(ARROW[label] || (label === 'Esc' ? 'Escape' : label));
   return true;
 }
 
@@ -394,6 +395,50 @@ async function navigator(browser) {
 
 // A pasted .tmux.conf: its prefix and keys are the game's, the 指南 says
 // them, unknown lines are listed, and the run goes on the boards like any other.
+// A slip at some question (another window, zoom, copy mode, detach, a split,
+// a close, a prompt or y/n or list left open…), then only the guide: it must
+// always have a next step and solve the question.
+async function slips(browser) {
+  const L = '[slips]';
+  const SLIPS = {
+    next: ['n'], last: ['l'], zoom: ['z'], copy: ['['], detach: ['d'], splitv: ['%'], splith: ['"'],
+    neww: ['c'], close: ['x', 'y'], rename_open: [','], confirm_open: ['&'], armed: [], swap: ['{'],
+    killw: ['&', 'y'], picker: ['s'], cmd: [':'],
+  };
+  const stuck = [];
+  let n = 0;
+  for (const [slip, keys] of Object.entries(SLIPS)) {
+    const course = n % 2 ? 'hard' : 'normal';
+    const at = (n * 5) % 15;
+    n++;
+    const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    const errors = watch(page);
+    await page.goto(PAGE);
+    await page.click(`#course-list [data-course="${course}"]`);
+    await waitPlay(page);
+    for (let g = 0; g < 200; g++) {
+      const s = await st(page);
+      if (!s.run || s.run.phase !== 'play' || s.run.i > at) break;
+      if (s.run.i < at) { await followGuide(page, 'Control+b'); continue; }
+      await page.keyboard.press('Control+b');
+      for (const k of keys) await page.keyboard.press(k);
+      let solved = false, why = 'not solved in 30 steps';
+      for (let k = 0; k < 30; k++) {
+        const now = await st(page);
+        if (!now.run || now.run.i !== at || now.run.phase !== 'play') { solved = true; break; }
+        if (!now.run.next) { why = 'no next step'; break; }
+        await followGuide(page, 'Control+b');
+      }
+      if (!solved) { const now = await st(page); stuck.push(slip + ' at ' + course + ' q' + (at + 1) + ' (' + (now.run && now.run.type) + '): ' + why); }
+      break;
+    }
+    if (errors.length) stuck.push(slip + ': ' + errors.join(' | '));
+    await ctx.close();
+  }
+  ok(!stuck.length, L + ' after any slip the guide still solves the question' + (stuck.length ? ': ' + stuck.join('; ') : ' (' + Object.keys(SLIPS).length + ' slips)'));
+}
+
 // What a first player ran into (the Claude in Chrome playtest): moving to
 // another pane does not pass a resize, the guide stays while typing a name and
 // says when the name came out wrong, copy mode ends with its question, and a
@@ -1098,6 +1143,7 @@ const parts = [
   ['noconfirm', noConfirm],
   ['english', english],
   ['playtest', playtest],
+  ['slips', slips],
   ['editing', lineEditing],
   ['records', records],
   ['learning', learning],
