@@ -35,9 +35,9 @@
     yank: ['Home', 'Space', 'End', 'Enter'],
     paste: [']'],
     kill_window: ['&', 'y'],
-    new_session: [':', 'new -s 名前'],
+    new_session: [':'],
     rename_session: ['$'],
-    choose: ['s', '(', ')']
+    choose: ['s', '(', ')', 'L']
   };
 
   // Human-readable hint for an action, like key() in the shell script.
@@ -65,7 +65,7 @@
     kill_window: '&（Shift+7）→ 確認に y',
     new_session: ':（コマンド入力）→ new -s 名前 → Enter',
     rename_session: '$ → 名前を入力して Enter',
-    choose: 's で一覧（↑ ↓ と Enter）か、( ) で前・次のセッションへ'
+    choose: 's で一覧（↑ ↓ と Enter）か、( ) で前・次のセッションへ（L で直前のセッションへ）'
   };
 
   // Tips: why a key is what it is, neighbours worth knowing, and how to
@@ -84,7 +84,8 @@
     page: ['コピーモードの 1 ページは PageUp / PageDown。vi 式は Ctrl+u / Ctrl+d で半ページ、emacs 式は Alt+v / Ctrl+v で 1 ページ。', 'prefix → PageUp なら、コピーモードに入りながら 1 ページ上へ。'],
     last_window: ['prefix → l は last-window。二つのウィンドウを行き来するなら、番号より速い。ステータスバーでは直前のウィンドウに - が付く。'],
     break_pane: ['! は break-pane。逆に、別のウィンドウのペインをここに連れてくるのは join-pane（prefix → : で join-pane -s 番号）。'],
-    detach: ['デタッチしてもセッションは裏で動き続ける。SSH が切れても作業は残る。tmux a は tmux attach の略。'],
+    detach: ['デタッチしてもセッションは裏で動き続ける。SSH が切れても作業は残る。tmux a は tmux attach の略。',
+      'セッションが二つ以上あるときは tmux attach -t 名前 で選んで入る。-t を省くと、最後に使っていたセッションに入る。'],
     swap: ['prefix → C-o で、ウィンドウのペイン全部を回転させる（rotate-window）。'],
     layout: ['Alt+1〜5 で並べ方を直接選べる。1 は横に均等、2 は縦に均等、5 が田の字（tiled）。'],
     rename_pane: ['ペインの名前は pane-border-status を top にすると、枠の上に出る。'],
@@ -93,9 +94,9 @@
       'コピーモードに入ると、カーソルはシェルのカーソルの場所（プロンプトの行）にある。写るのは Space を押した所からカーソルまで。行の頭は Home（vi 式は 0、emacs 式は C-a）、行の終わりは End（$ / C-e）。'],
     paste: ['prefix → = で、これまでにコピーしたもの（バッファ）の一覧から選んで貼れる。prefix → # で一覧を見るだけ。'],
     kill_window: ['& も確認付き。ウィンドウの中のペインが全部閉じる。'],
-    new_session: ['外からは tmux new -s 名前。中からなら prefix → : で new -s 名前。'],
+    new_session: ['外からは tmux new -s 名前。中からなら prefix → : で new -s 名前。できたセッションにそのまま移る。'],
     rename_session: ['セッションの名前は、外から tmux attach -t 名前 で選ぶときに使う。'],
-    choose: ['s はセッションの一覧、w はウィンドウまで含めた一覧（どちらも choose-tree）。( と ) は前後のセッションへ。']
+    choose: ['s はセッションの一覧、w はウィンドウまで含めた一覧（どちらも choose-tree）。( と ) は前後のセッションへ、L は直前のセッションへ。', 'セッションは名前の順に並ぶ（tmux ls も一覧も）。( と ) はその順で前後へ回る。']
   };
 
   function tipsFor(action) {
@@ -118,7 +119,9 @@
   // several keys (入門 1.35 keys a question, 中級 1.7, 上級 2.9 on average, so
   // the same player lands on about the same Lv on each). Bump `ver`
   // whenever `qs` or the rules change, so older runs can be told apart in
-  // the history (ver 2: no skipping, no +5 秒).
+  // the history (ver 2: no skipping, no +5 秒). The server keeps one ver for
+  // every course (rules.js), so 上級's session questions came without a
+  // bump: its all-time board mixes runs from before (accepted).
   // The ids stay easy / normal / hard so older records carry over.
   var COURSES = [
     {
@@ -136,8 +139,8 @@
     {
       id: 'hard', title: '上級', mode: '真剣勝負', limit: 18, rankMul: 1.6, ver: 2,
       plan: { cols: 5, rows: 4, cells: 20, lit: 6 },
-      desc: '1 問で 2〜8 手。履歴の検索も。考える前に手が動くか。',
-      qs: ['find_zoom', 'trident', 'two_akima', 'new_and_home', 'swap_zoom', 'split_lr', 'yank_paste', 'copy_top', 'two_akima', 'trident', 'kill_window', 'swap_zoom', 'new_and_home', 'focus', 'resize', 'copy_search']
+      desc: '1 問で 2〜8 手。セッションを作る・移る・attach -t で入る、履歴の検索も混ざる。考える前に手が動くか。',
+      qs: ['find_zoom', 'trident', 'two_akima', 'new_and_home', 'swap_zoom', 'split_lr', 'yank_paste', 'copy_top', 'session_new', 'trident', 'kill_window', 'session_switch', 'session_attach', 'focus', 'resize', 'copy_search']
     }
   ];
 
