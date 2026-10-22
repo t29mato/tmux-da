@@ -394,6 +394,29 @@ async function navigator(browser) {
 
 // A pasted .tmux.conf: its prefix and keys are the game's, the 指南 says
 // them, unknown lines are listed, and the run goes on the boards like any other.
+// The no-confirm button adds the two binds, and x closes without asking.
+async function noConfirm(browser) {
+  const L = '[no confirm]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  ok(!(await st(page)).conf, L + ' off by default: tmux asks y first');
+  await page.click('#conf-box summary');
+  await page.click('#conf-noconfirm');
+  ok(/bind x kill-pane/.test(await page.inputValue('#conf-text')), L + ' the button writes the binds into the box');
+  ok(/確認なし/.test(await page.$eval('#conf-report', (e) => e.textContent)), L + ' the report says x closes without asking');
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  await page.keyboard.press('Control+b'); await page.keyboard.press('%');
+  const n = (await st(page)).panes.length;
+  await page.keyboard.press('Control+b'); await page.keyboard.press('x');
+  const s = await st(page, true);
+  ok(s.panes.length === n - 1, L + ' Ctrl+b x closes the pane at once (' + n + ' → ' + s.panes.length + ')');
+  ok(!errors.length, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 async function ownConf(browser) {
   const L = '[own conf]';
   const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
@@ -950,6 +973,7 @@ const parts = [
   ['clear', clearHold],
   ['navigator', navigator],
   ['ownconf', ownConf],
+  ['noconfirm', noConfirm],
   ['editing', lineEditing],
   ['records', records],
   ['learning', learning],

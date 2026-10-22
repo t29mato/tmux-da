@@ -211,6 +211,7 @@
     { table: 'prefix', key: 'C-l', argv: ['send-keys', 'C-l'] }
   ];
 
+  var SAMPLE_NOCONFIRM = "# 確認なしで閉じる（y を押さない）\nbind x kill-pane\nbind & kill-window\n";
   var SAMPLE_NAVIGATOR = "# vim-tmux-navigator（TPM で入れる）\nset -g @plugin 'christoomey/vim-tmux-navigator'\nrun '~/.tmux/plugins/tpm/tpm'\n";
 
   // The whole file → {prefix, prefix2, binds, unbinds, unbindAll, used, skipped, navigator, custom}.
@@ -310,6 +311,6 @@
   window.ADV = window.ADV || {};
   window.ADV.conf = {
     parse: parse, parseKey: parseKey, keyLabel: keyLabel, matches: matches, words: words,
-    lookup: lookup, overridden: overridden, isPrefix: isPrefix, SAMPLE_NAVIGATOR: SAMPLE_NAVIGATOR
+    lookup: lookup, overridden: overridden, isPrefix: isPrefix, SAMPLE_NAVIGATOR: SAMPLE_NAVIGATOR, SAMPLE_NOCONFIRM: SAMPLE_NOCONFIRM
   };
 })();
