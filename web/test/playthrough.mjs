@@ -203,7 +203,8 @@ async function playCourse(page, prefix, prefixOpt, label, how) {
     const i = s.run.i;
     seen.add(s.run.type);
     // The order is in the house, and the 完成図 marks what to change.
-    const ob = await page.$eval('#term .motd .ob-q', (e) => e.textContent).catch(() => '');
+    // A two-step question shows the step big and the whole order small.
+    const ob = await page.$eval('#term .motd', (e) => (e.querySelector('.ob-whole') || e.querySelector('.ob-q')).textContent).catch(() => '');
     if (ob !== s.run.order) ok(false, label + ' question ' + (i + 1) + ' (' + s.run.type + '): the order bar says "' + ob + '"');
     const marks = await page.$$eval('#term .goal, #status .goal-tab', (e) => e.length);
     if (!marks) ok(false, label + ' question ' + (i + 1) + ' (' + s.run.type + '): no 完成図 mark in the house');
