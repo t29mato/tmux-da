@@ -394,6 +394,59 @@ async function navigator(browser) {
 
 // A pasted .tmux.conf: its prefix and keys are the game's, the 指南 says
 // them, unknown lines are listed, and the run goes on the boards like any other.
+// What a first player ran into (the Claude in Chrome playtest): moving to
+// another pane does not pass a resize, the guide stays while typing a name and
+// says when the name came out wrong, copy mode ends with its question, and a
+// prefix key pressed without the prefix is explained.
+async function playtest(browser) {
+  const L = '[playtest]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  let s = await st(page);
+  for (let g = 0; g < 60 && s.run.type !== 'split_lr'; g++) { await followGuide(page, 'Control+b'); s = await st(page); }
+  await page.keyboard.press('%');
+  ok(/シェルに入った/.test(await page.$eval('#status', (e) => e.textContent)), L + ' % without the prefix: the status says it went to the shell');
+  await page.keyboard.press('Enter');
+  await page.click('.quit');
+  await page.click('#course-list [data-course="normal"]');
+  await waitPlay(page);
+  const seen = {};
+  for (let g = 0; g < 400; g++) {
+    s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    const t = s.run.type, i = s.run.i;
+    if (t === 'resize' && !seen.resize && s.panes.length > 1) {
+      seen.resize = 1;
+      for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) {
+        await page.keyboard.press('Control+b'); await page.keyboard.press(k);
+        if ((await st(page, true)).activePane !== s.activePane) break;
+      }
+      const after = await st(page, true);
+      ok(after.run.i === i && after.run.phase === 'play', L + ' resize: moving to another pane does not pass it');
+    }
+    if (t === 'rename' && !seen.rename) {
+      seen.rename = 1;
+      await page.keyboard.press('Control+b'); await page.keyboard.press(',');
+      ok(/Backspace/.test(await page.$eval('#term .guide-card', (e) => e.textContent).catch(() => '')), L + ' rename: the card stays while typing and says how to clear the old name');
+      await page.keyboard.type('x'); await page.keyboard.press('Enter');
+      ok(/名前が「/.test(await page.$eval('#term .guide-card', (e) => e.textContent).catch(() => '')), L + ' rename: a wrong name is said, with how to fix it');
+    }
+    if (seen.copy === 1 && t !== 'copy_top') {
+      seen.copy = 2;
+      ok(!(await page.$('#term [data-copy-ind]')), L + ' copy mode ends with its question');
+    }
+    if (t === 'copy_top') seen.copy = 1;
+    await followGuide(page, 'Control+b');
+  }
+  ok(seen.resize && seen.rename && seen.copy === 2, L + ' the run had a resize, a rename and a scroll');
+  ok(!errors.length, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // In English (the browser's language): a whole course by the guide, the
 // result and the records, with no Japanese left on screen except the switch
 // back to 日本語, and no text missing from the English table.
@@ -1032,6 +1085,7 @@ const parts = [
   ['ownconf', ownConf],
   ['noconfirm', noConfirm],
   ['english', english],
+  ['playtest', playtest],
   ['editing', lineEditing],
   ['records', records],
   ['learning', learning],
