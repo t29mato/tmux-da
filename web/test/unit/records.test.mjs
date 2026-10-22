@@ -127,11 +127,14 @@ test('storage that throws does not break the game', () => {
 // A run where every question is `t`, each taking `s` seconds (easy: 目安 12).
 const typed = (t, s, extra = {}) => ({ ...run(15 * s), qs: Array.from({ length: 15 }, () => ({ t, s, m: 0, ...extra })) });
 
-test('learnt: three clean solves in a row within the 目安 make a type learnt', () => {
+const clean = (n, q = { t: 'zoom', s: 2, m: 0 }) => Array.from({ length: n }, () => ({ ...q }));
+
+test('learnt: five clean solves in a row within the 目安 make a type learnt (LEARNT_AFTER)', () => {
   const REC = fresh();
-  REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 0 }, { t: 'zoom', s: 2, m: 0 }] });
+  REC.add({ ...run(30), qs: clean(4) });
   assert.equal(REC.learnt().zoom.learnt, false);
-  REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 0 }] });
+  assert.equal(REC.learnt().zoom.streak, 4);
+  REC.add({ ...run(30), qs: clean(1) });
   assert.equal(REC.learnt().zoom.learnt, true);
 });
 
@@ -139,12 +142,12 @@ test('learnt: a wrong key, an overrun, a peek at the 手順 or a solve past half
   // The 目安 is logged per question (`l`); older logs fall back on the course's (easy: 12).
   for (const bad of [{ m: 1 }, { o: 1 }, { g: 1 }, { s: 6.1 }, { s: 3.6, l: 7 }]) {
     const REC = fresh();
-    REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 0 }, { t: 'zoom', s: 2, m: 0 }, { t: 'zoom', s: 2, m: 0 }, { t: 'zoom', s: 2, m: 0, ...bad }] });
+    REC.add({ ...run(30), qs: clean(5).concat([{ t: 'zoom', s: 2, m: 0, ...bad }]) });
     assert.equal(REC.learnt().zoom.learnt, false, JSON.stringify(bad));
     assert.equal(REC.learnt().zoom.streak, 0);
   }
   const REC = fresh();
-  REC.add({ ...run(30), qs: [{ t: 'zoom', s: 3.5, m: 0, l: 7 }, { t: 'zoom', s: 6, m: 0 }, { t: 'zoom', s: 3.5, m: 0, l: 7 }] });
+  REC.add({ ...run(30), qs: [{ t: 'zoom', s: 3.5, m: 0, l: 7 }, { t: 'zoom', s: 6, m: 0 }, { t: 'zoom', s: 3.5, m: 0, l: 7 }, { t: 'zoom', s: 6, m: 0 }, { t: 'zoom', s: 3.5, m: 0, l: 7 }] });
   assert.equal(REC.learnt().zoom.learnt, true, 'exactly half the 目安 still counts');
 });
 
@@ -157,8 +160,8 @@ test('limitOf: a question\'s own 目安, else its course\'s old one', () => {
 
 test('add reports what was learnt and what slipped in this run', () => {
   const REC = fresh();
-  REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 0 }, { t: 'zoom', s: 2, m: 0 }] });
-  const s1 = REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 0 }] });
+  REC.add({ ...run(30), qs: clean(4) });
+  const s1 = REC.add({ ...run(30), qs: clean(1) });
   assert.deepEqual(plain(s1.learntNew), ['zoom']);
   const s2 = REC.add({ ...run(30), qs: [{ t: 'zoom', s: 2, m: 1 }] });
   assert.deepEqual(plain(s2.learntLost), ['zoom']);
@@ -166,11 +169,14 @@ test('add reports what was learnt and what slipped in this run', () => {
 
 test('weakTypes: the slowest types relative to their 目安, most overruns first', () => {
   const REC = fresh();
-  REC.add({ ...run(30), qs: [
+  const mixed = () => ({ ...run(30), qs: [
     ...Array.from({ length: 4 }, () => ({ t: 'zoom', s: 1, m: 0 })),
     ...Array.from({ length: 4 }, () => ({ t: 'resize', s: 9, m: 0, o: 1 })),
     ...Array.from({ length: 4 }, () => ({ t: 'focus', s: 4, m: 0 }))
   ] });
+  REC.add(mixed());
+  assert.deepEqual(plain(REC.weakTypes(3)), [], 'one run is not enough to call anything weak (the records say so too)');
+  REC.add(mixed());
   assert.deepEqual(plain(REC.weakTypes(2)), ['resize'], 'focus is within its 目安 and no slower than the rest: not weak');
   assert.deepEqual(plain(fresh().weakTypes(3)), [], 'nothing to go on yet');
 });
