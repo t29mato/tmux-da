@@ -431,6 +431,9 @@ async function english(browser) {
   }
   await waitResult(page, L);
   ok((await st(page)).result.misses === 0, L + ' the English guide leads to no wrong key');
+  const share = await page.$eval('#result-body .share-text', (e) => e.textContent);
+  ok(/^tmux Dojo Beginner [\d.]+s \(par 36s\) \S+/.test(share) && (share.match(/[🟩🟨🟥]/gu) || []).length === 15 && /tmux-dojo\/\?lang=en$/.test(share),
+    L + ' the result to share: time against par, the rank, a square per question, the link (' + share.replace(/\n/g, ' / ') + ')');
   await look();
   await page.click('#result-body [data-title]');
   await page.click('#btn-records');
