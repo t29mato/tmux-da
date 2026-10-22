@@ -140,7 +140,7 @@ async function solve(page, prefix, prefixOpt) {
       if (s.activeIndex !== s.run.goal.index) await p(String(s.run.goal.index));
       await p('&'); await page.keyboard.press('y');
       break;
-    case 'copy_top': await p('['); await page.keyboard.press('g'); break;
+    case 'copy_top': await p('['); await page.keyboard.press('g'); await page.keyboard.press('q'); break;
     case 'find_zoom': await goTo(page, prefix); await p('z'); break;
     case 'trident': await p('%'); await p('"'); break;
     case 'two_akima':
@@ -1556,6 +1556,72 @@ async function loop2(browser) {
   await ctx.close();
 }
 
+// Round 3 (learning): the scroll question ends only after q leaves copy
+// mode; a wrong key says what it did; the result's tip is about the question
+// that took longest; the weak panel carries the tip of each weak type.
+async function loop3(browser) {
+  const L = '[loop3]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  const walkTo = async (pred) => {
+    for (let g = 0; g < 300; g++) {
+      const s = await st(page);
+      if (!s.run || s.run.phase !== 'play') return null;
+      if (pred(s)) return s;
+      await followGuide(page, 'Control+b');
+    }
+    return null;
+  };
+  await page.click('#course-list [data-course="normal"]');
+  await waitPlay(page);
+  // 1: a wrong key names itself and its job.
+  let s = await walkTo((x) => x.run.type === 'split_lr');
+  if (s) {
+    await page.keyboard.press('Control+b'); await page.keyboard.press('"');
+    const chip = await page.$eval('#chips', (e) => e.textContent);
+    ok((await st(page)).run.misses === s.run.misses + 1 && /" は「上下に分割」/.test(chip), L + ' the miss chip says what " did: ' + chip);
+  } else ok(false, L + ' no split_lr reached');
+  // 2: copy_top: [ → g → q; after g the question waits for q.
+  s = await walkTo((x) => x.run.type === 'copy_top');
+  if (s) {
+    const at = s.run.i;
+    const keys = [];
+    for (let k = 0; k < 8; k++) {
+      const x = await st(page);
+      if (x.run.i !== at) break;
+      keys.push(x.run.next.keys[0]);
+      if (x.run.next.keys[0] === 'q') {
+        const card = await page.$eval('#term .guide-card', (e) => e.textContent).catch(() => '');
+        ok(x.copyMode && /手順 3\/3/.test(card), L + ' at the top, still in copy mode, the card asks for q as step 3/3 (' + card + ')');
+      }
+      await followGuide(page, 'Control+b');
+    }
+    const done = await st(page);
+    ok(keys.join(',') === '[,g,q' && done.run.i > at && !done.copyMode && done.run.misses === (s.run.misses || 0), L + ' the scroll question takes [, g, q and ends out of copy mode (' + keys.join(',') + ')');
+  } else ok(false, L + ' no copy_top reached');
+  await walkTo(() => false);
+  await waitResult(page, L);
+  // 3: the tip is about the question that took longest.
+  const r = (await st(page)).result;
+  const longest = r.qlog.slice().sort((a, b) => b.s - a.s)[0];
+  const head = await page.$eval('#result-body .tips-head', (e) => e.textContent).catch(() => '');
+  ok(r.tipFor === (r.slow || longest.t) && head.indexOf('豆知識 ・ ') === 0 && head.length > 6, L + ' the 豆知識 is about ' + r.tipFor + ' (' + head + ')');
+  // 4: the weak panel of the records carries a tip per weak type.
+  await page.evaluate(() => {
+    for (let k = 0; k < 2; k++) ADV.records.add({ course: 'normal', prefix: 'C-b', time: 60, raw: 60, misses: 0, overs: 1, guides: 0, keys: 30, n: 20, qs: Array.from({ length: 6 }, () => ({ t: 'resize', s: 13, m: 0, o: 1 })) });
+  });
+  await page.waitForTimeout(800);
+  await page.keyboard.press('r');
+  await page.waitForFunction(() => document.body.dataset.screen === 'records');
+  const tip = await page.$eval('#records-body .weak-list .w-tip', (e) => e.textContent).catch(() => '');
+  ok(/repeat-time|マウス/.test(tip), L + ' the weak 大きさ変更 row carries a resize tip: ' + tip.slice(0, 40));
+  await shot(page, 'loop3-records-weak');
+  ok(!errors.length, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -1585,6 +1651,7 @@ const parts = [
   ['ux', uxScreens],
   ['longview', longView],
   ['loop2', loop2],
+  ['loop3', loop3],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
