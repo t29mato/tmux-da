@@ -133,3 +133,22 @@ test('unknown paths and bodies', async () => {
   assert.equal(res.status, 400);
   assert.ok(key);
 });
+
+test('counts: a visit reports its steps; the stats add them up by day and course', async () => {
+  const v = 'v_' + '0123456789abcdef';
+  for (const e of [{ e: 'visit' }, { e: 'start', c: 'easy' }, { e: 'q1', c: 'easy' }, { e: 'quit', c: 'easy', n: 4 }]) {
+    assert.equal((await call('POST', '/v1/ev', { v, ...e })).status, 204);
+  }
+  assert.equal((await call('POST', '/v1/ev', { v: 'v_' + 'f'.repeat(16), e: 'visit' })).status, 204);
+  const s = (await call('GET', '/v1/stats?days=3')).body;
+  const today = Object.values(s.days)[0];
+  assert.equal(today.visitors, 2);
+  assert.deepEqual(today.courses.easy, { start: 1, q1: 1, finish: 0, quit: 1 });
+  assert.deepEqual(s.quitAt, [{ c: 'easy', n: 4, k: 1 }]);
+});
+
+test('counts: anything but the known steps is refused', async () => {
+  for (const b of [{ v: 'me', e: 'visit' }, { v: 'v_0123456789abcdef', e: 'click' }, { v: 'v_0123456789abcdef', e: 'start', c: 'nope' }]) {
+    assert.equal((await call('POST', '/v1/ev', b)).status, 400, JSON.stringify(b));
+  }
+});

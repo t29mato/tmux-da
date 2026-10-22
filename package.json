@@ -8,6 +8,7 @@
     "test:unit": "node --test 'web/test/unit/*.test.mjs' 'server/test/*.test.mjs'",
     "test:game": "node web/test/playthrough.mjs",
     "test:online": "scripts/test.sh online",
+    "stats": "node scripts/stats.mjs",
     "deploy:server": "cd server && wrangler deploy"
   },
   "devDependencies": {

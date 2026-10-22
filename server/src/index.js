@@ -10,11 +10,17 @@
 //   POST /v1/scores { key, run }        → { rank, total }    enter a run on the boards
 //   GET  /v1/board?course=&span=        → { rows }           today / week / all
 //   GET  /v1/ghost?course=&span=        → { name, time, splits } the run to race
+//   POST /v1/ev     { v, e, c, n }      → 204                one step of a visit (counts only)
+//   GET  /v1/stats?days=                → { days }           the counts per day
 
 import { COURSES, VER, Fail, normalizeKey, cleanRun, jstDay, checkRun } from './rules.js';
 
 const MAX_RUNS = 900, MAX_BODY = 600 * 1024;
-const LIMITS = { keys: 5, sync: 30, name: 10, scores: 20 };
+const LIMITS = { keys: 5, sync: 30, name: 10, scores: 20, ev: 60 };
+
+// What a visit may report: the page opened, a course started, its first
+// question solved, the course finished, a run left half way.
+const EVENTS = ['visit', 'start', 'q1', 'finish', 'quit'];
 
 const ORIGINS = ['https://t29mato.github.io', 'null', 'http://localhost', 'http://127.0.0.1'];
 
@@ -65,8 +71,9 @@ async function route(req, env) {
   const p = url.pathname;
   if (req.method === 'GET' && p === '/v1/board') return board(env, url.searchParams);
   if (req.method === 'GET' && p === '/v1/ghost') return ghost(env, url.searchParams);
+  if (req.method === 'GET' && p === '/v1/stats') return stats(env, url.searchParams);
   if (req.method !== 'POST') throw new Fail(404, 'not found');
-  const name = { '/v1/keys': 'keys', '/v1/sync': 'sync', '/v1/name': 'name', '/v1/scores': 'scores' }[p];
+  const name = { '/v1/keys': 'keys', '/v1/sync': 'sync', '/v1/name': 'name', '/v1/scores': 'scores', '/v1/ev': 'ev' }[p];
   if (!name) throw new Fail(404, 'not found');
   await limit(env, req, name);
   const text = await req.text();
@@ -76,6 +83,7 @@ async function route(req, env) {
     try { body = JSON.parse(text); } catch (e) { throw new Fail(400, 'bad json'); }
   }
   if (name === 'keys') return newKey(env);
+  if (name === 'ev') return event(env, body);
   const hash = await player(env, body.key);
   if (name === 'sync') return sync(env, hash, body.runs);
   if (name === 'name') return setName(env, hash, body.name);
@@ -196,4 +204,59 @@ async function ghost(env, q) {
   if (!rows.length) return json({ ghost: null });
   const r = rows[0];
   return json({ ghost: { name: r.name, time: r.time, day: r.day, splits: JSON.parse(r.splits) } }, 200, { 'Cache-Control': 'max-age=15' });
+}
+
+// ---- counts -------------------------------------------------------------------
+// A visit is a random id made in the browser, never tied to a 合言葉 or a
+// name. Only the step and the course are kept, by day.
+
+let evReady = false;
+async function evTable(env) {
+  if (evReady) return;
+  await env.DB.prepare(
+    'CREATE TABLE IF NOT EXISTS events (day TEXT NOT NULL, v TEXT NOT NULL, e TEXT NOT NULL, c TEXT NOT NULL, n INTEGER NOT NULL, at TEXT NOT NULL)'
+  ).run();
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS events_day ON events (day, e)').run();
+  evReady = true;
+}
+
+async function event(env, b) {
+  const v = typeof b.v === 'string' && /^v_[0-9a-f]{16}$/.test(b.v) ? b.v : null;
+  if (!v || EVENTS.indexOf(b.e) < 0) throw new Fail(400, 'bad event');
+  const c = b.c == null || b.c === '' ? '' : String(b.c);
+  if (c && !COURSES[c] && c !== 'keiko') throw new Fail(400, 'bad course');
+  const n = Number.isInteger(b.n) && b.n >= 0 && b.n < 100 ? b.n : 0;
+  await evTable(env);
+  const now = new Date();
+  await env.DB.prepare('INSERT INTO events (day, v, e, c, n, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
+    .bind(jstDay(now), v, b.e, c, n, now.toISOString()).run();
+  return new Response(null, { status: 204 });
+}
+
+// Per day: visitors, how many came back from an earlier day, and per course
+// how many started, solved the first question, finished, and where those
+// who left stopped.
+async function stats(env, q) {
+  const days = Math.max(1, Math.min(60, parseInt(q.get('days') || '14', 10) || 14));
+  await evTable(env);
+  const since = jstDay(new Date(Date.now() - (days - 1) * 86400 * 1000));
+  const rows = (await env.DB.prepare(
+    'SELECT day, e, c, COUNT(DISTINCT v) AS n FROM events WHERE day >= ?1 GROUP BY day, e, c'
+  ).bind(since).all()).results;
+  const back = (await env.DB.prepare(
+    'SELECT a.day, COUNT(DISTINCT a.v) AS n FROM events a WHERE a.day >= ?1 AND a.e = \'visit\' ' +
+    'AND EXISTS (SELECT 1 FROM events b WHERE b.v = a.v AND b.day < a.day) GROUP BY a.day'
+  ).bind(since).all()).results;
+  const quits = (await env.DB.prepare(
+    'SELECT c, n, COUNT(*) AS k FROM events WHERE day >= ?1 AND e = \'quit\' GROUP BY c, n'
+  ).bind(since).all()).results;
+  const out = {};
+  for (const r of rows) {
+    const d = out[r.day] || (out[r.day] = { visitors: 0, back: 0, courses: {} });
+    if (r.e === 'visit') { d.visitors += r.n; continue; }
+    const c = d.courses[r.c] || (d.courses[r.c] = { start: 0, q1: 0, finish: 0, quit: 0 });
+    c[r.e] = r.n;
+  }
+  for (const r of back) if (out[r.day]) out[r.day].back = r.n;
+  return json({ since, days: out, quitAt: quits }, 200, { 'Cache-Control': 'max-age=60' });
 }

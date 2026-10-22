@@ -38,3 +38,8 @@ CREATE TABLE IF NOT EXISTS hits (
   n      INTEGER NOT NULL,
   PRIMARY KEY (ip, minute)
 );
+
+-- One step of a visit (the counts): a random id per browser, never tied to
+-- a 合言葉. The Worker also creates this on first use.
+CREATE TABLE IF NOT EXISTS events (day TEXT NOT NULL, v TEXT NOT NULL, e TEXT NOT NULL, c TEXT NOT NULL, n INTEGER NOT NULL, at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS events_day ON events (day, e);
