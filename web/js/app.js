@@ -1355,8 +1355,21 @@
     return moveTo(S.target) || mv(['{'], '{ を押す（前のペインと入れ替わる。左上に着くまで）');
   }
 
-  // Every question: text (the generic order, for lists; setup may write a
-  // specific one into S.qText), the tmux command it teaches, the actions it
+  // The pane a swap question moves to the top left: the one you are in if
+  // it is near enough, else one at most two places down the layout order,
+  // so the question takes two swaps at most (plus the walk to it).
+  var SWAP_REACH = 2;
+  function swapTarget(r) {
+    var win = T.activeWindow(S.session);
+    var panes = T.panesOf(win);
+    var at = panes.map(function (p) { return p.id; }).indexOf(win.active);
+    if (at > 0 && at <= SWAP_REACH) return panes[at];
+    return pick(r, panes.slice(1, SWAP_REACH + 1));
+  }
+
+  // Every question: steps (how many moves it takes, for its 目安: see
+  // LV.limitFor; left out, it counts as two), text (the generic order, for
+  // lists; setup may write a specific one into S.qText), the tmux command it teaches, the actions it
   // may use (others are misses), the key actions to show, setup(r): what it
   // needs of the live house and what it targets, check(), next(): the move
   // the guide shows from the current state, and goal(): what to change,
@@ -1364,23 +1377,26 @@
   // {tab, tag} on a window in the status bar ('+' for a new one).
   function activeId() { return T.activeWindow(S.session).active; }
 
+  // The 目安 of a question type, in seconds.
+  function qLimit(type) { return LV.limitFor(Q[type] && Q[type].steps); }
+
   var Q = {
     split_lr: {
-      text: '左右に分割する（split）', cmd: 'split-window -h', allow: ['split_lr'], show: ['split_lr'],
+      steps: 1, text: '左右に分割する（split）', cmd: 'split-window -h', allow: ['split_lr'], show: ['split_lr'],
       goal: function () { return [{ pane: activeId(), mark: 'split-v', tag: 'ここを左右に' }]; },
       setup: function () { S.q0 = splitCount(T.activeWindow(S.session), 'lr'); },
       check: function () { return splitCount(T.activeWindow(S.session), 'lr') > S.q0; },
       next: function () { return mv(['%'], '% を押す（Shift+5）。右に新しいペインが開く'); }
     },
     split_tb: {
-      text: '上下に分割する（split）', cmd: 'split-window -v', allow: ['split_tb'], show: ['split_tb'],
+      steps: 1, text: '上下に分割する（split）', cmd: 'split-window -v', allow: ['split_tb'], show: ['split_tb'],
       goal: function () { return [{ pane: activeId(), mark: 'split-h', tag: 'ここを上下に' }]; },
       setup: function () { S.q0 = splitCount(T.activeWindow(S.session), 'tb'); },
       check: function () { return splitCount(T.activeWindow(S.session), 'tb') > S.q0; },
       next: function () { return mv(['"'], '" を押す（ダブルクォート）。下に新しいペインが開く'); }
     },
     focus: {
-      text: '隣のペインへ移動する', cmd: 'select-pane -L/-R/-U/-D', allow: [], show: ['focus'],
+      steps: 2, text: '隣のペインへ移動する', cmd: 'select-pane -L/-R/-U/-D', allow: [], show: ['focus'],
       goal: function () { return [{ pane: S.target, mark: 'go', tag: 'ここへ' }]; },
       setup: function (r) {
         needUnzoom(); needPanes(2);
@@ -1392,21 +1408,21 @@
       next: function () { return moveTo(S.target); }
     },
     zoom: {
-      text: 'このペインを全画面にする（zoom）', cmd: 'resize-pane -Z', allow: ['zoom'], show: ['zoom'],
+      steps: 1, text: 'このペインを全画面にする（zoom）', cmd: 'resize-pane -Z', allow: ['zoom'], show: ['zoom'],
       goal: function () { return [{ pane: activeId(), mark: 'zoom', tag: 'ここを全画面に' }]; },
       setup: function () { needUnzoom(); needPanes(2); },
       check: function () { return T.activeWindow(S.session).zoomed; },
       next: function () { return mv(['z'], 'z を押す。このペインだけが画面いっぱいになる'); }
     },
     unzoom: {
-      text: '全画面をやめて元の分割に戻す', cmd: 'resize-pane -Z', allow: ['zoom'], show: ['zoom'],
+      steps: 1, text: '全画面をやめて元の分割に戻す', cmd: 'resize-pane -Z', allow: ['zoom'], show: ['zoom'],
       goal: function () { return [{ pane: activeId(), mark: 'unzoom', tag: '元の分割に戻す' }]; },
       setup: function () { needZoom(); },
       check: function () { return !T.activeWindow(S.session).zoomed; },
       next: function () { return mv(['z'], 'もう一度 z を押す。元の分割に戻る'); }
     },
     close: {
-      text: 'ペインを閉じる（kill-pane）', cmd: 'kill-pane', allow: ['close'], show: ['focus', 'close'],
+      steps: 4, text: 'ペインを閉じる（kill-pane）', cmd: 'kill-pane', allow: ['close'], show: ['focus', 'close'],
       goal: function () { return [{ pane: S.target, mark: 'close', tag: '閉じる' }]; },
       setup: function (r) {
         needUnzoom(); needPanes(2);
@@ -1418,14 +1434,14 @@
       next: function () { return closeMove(S.target); }
     },
     new_window: {
-      text: '新しいウィンドウを作る', cmd: 'new-window', allow: ['new_window'], show: ['new_window'],
+      steps: 1, text: '新しいウィンドウを作る', cmd: 'new-window', allow: ['new_window'], show: ['new_window'],
       goal: function () { return [{ tab: '+', tag: '新しいウィンドウ' }]; },
       setup: function () { S.q0 = S.session.windows.length; },
       check: function () { return S.session.windows.length > S.q0; },
       next: function () { return mv(['c'], 'c を押す（create）。新しいウィンドウが開く'); }
     },
     select_window: {
-      text: 'ほかのウィンドウへ移動する', cmd: 'select-window -t 番号', allow: ['select_window'], show: ['select_window'],
+      steps: 1, text: 'ほかのウィンドウへ移動する', cmd: 'select-window -t 番号', allow: ['select_window'], show: ['select_window'],
       goal: function () { return [{ tab: S.q0, tag: 'ここへ' }]; },
       setup: function (r) {
         needWindows(2);
@@ -1438,7 +1454,7 @@
       next: function () { return windowMove(S.q0); }
     },
     resize: {
-      text: 'このペインの大きさを変える（resize）', cmd: 'resize-pane -L/-R/-U/-D', allow: ['resize'], show: ['resize'],
+      steps: 1, text: 'このペインの大きさを変える（resize）', cmd: 'resize-pane -L/-R/-U/-D', allow: ['resize'], show: ['resize'],
       goal: function () { var d = resizedBy(); return [{ pane: S.q0.id, mark: 'resize', tag: d ? tx('いま {0} マス動いた（5 マスで成功）', d) : '境目を 5 マス以上動かす' }]; },
       setup: function () {
         needUnzoom(); needPanes(2);
@@ -1456,12 +1472,11 @@
       next: function () { return moveTo(S.q0.id) || resizeMove(); }
     },
     swap: {
-      text: 'ペインを左上まで入れ替えて動かす（swap）', cmd: 'swap-pane -U', allow: ['swap'], show: ['swap'],
+      steps: 3, text: 'ペインを左上まで入れ替えて動かす（swap）', cmd: 'swap-pane -U', allow: ['swap'], show: ['swap'],
       goal: function () { return [{ pane: S.target, mark: 'to-left', tag: '左上へ' }]; },
       setup: function (r) {
         needUnzoom(); needPanes(2);
-        // The pane you are in, unless it is at the top left already.
-        var p = isFirst(activeId()) ? pick(r, otherPanes()) : T.activePane(T.activeWindow(S.session));
+        var p = swapTarget(r);
         S.target = p.id;
         S.qText = function () { return tx('{0} を左上まで動かす（swap）', paneLabel(p)); };
       },
@@ -1469,7 +1484,7 @@
       next: swapMove
     },
     rename: {
-      text: 'ウィンドウの名前を変える（rename）', cmd: 'rename-window', allow: ['rename'], show: ['rename'],
+      steps: 4, text: 'ウィンドウの名前を変える（rename）', cmd: 'rename-window', allow: ['rename'], show: ['rename'],
       goal: function () { return [{ tab: S.q0.win, tag: tx('{0} に', S.q0.name) }]; },
       setup: function (r) {
         var win = T.activeWindow(S.session);
@@ -1487,7 +1502,7 @@
       }
     },
     kill_window: {
-      text: 'ウィンドウを閉じる（kill-window）', cmd: 'kill-window', allow: ['kill_window', 'select_window'], show: ['select_window', 'kill_window'],
+      steps: 3, text: 'ウィンドウを閉じる（kill-window）', cmd: 'kill-window', allow: ['kill_window', 'select_window'], show: ['select_window', 'kill_window'],
       goal: function () { return [{ tab: S.q0, mark: 'close', tag: '閉じる' }]; },
       setup: function (r) {
         needWindows(2);
@@ -1504,7 +1519,7 @@
       }
     },
     copy_top: {
-      text: 'スクロールして一番上まで戻る（copy mode）', cmd: 'copy-mode → history-top', allow: ['copy'], show: ['copy'],
+      steps: 2, text: 'スクロールして一番上まで戻る（copy mode）', cmd: 'copy-mode → history-top', allow: ['copy'], show: ['copy'],
       goal: function () { return [{ pane: S.target, mark: 'top', tag: '一番上まで' }]; },
       setup: function () {
         var pane = T.activePane(T.activeWindow(S.session));
@@ -1526,7 +1541,7 @@
       }
     },
     find_zoom: {
-      text: 'ペインへ移動して全画面にする', cmd: 'select-pane → resize-pane -Z', allow: ['zoom'], show: ['focus', 'zoom'],
+      steps: 3, text: 'ペインへ移動して全画面にする', cmd: 'select-pane → resize-pane -Z', allow: ['zoom'], show: ['focus', 'zoom'],
       goal: function () { return [{ pane: S.target, mark: 'zoom', tag: 'ここを全画面に' }]; },
       setup: function (r) {
         needUnzoom(); needPanes(2);
@@ -1543,7 +1558,7 @@
       next: function () { return moveTo(S.target) || mv(['z'], 'z を押す（全画面に）'); }
     },
     trident: {
-      text: '左右に分割し、右側をさらに上下に分割する', cmd: 'split-window -h → -v', allow: ['split_lr', 'split_tb'], show: ['split_lr', 'split_tb'],
+      steps: 2, text: '左右に分割し、右側をさらに上下に分割する', cmd: 'split-window -h → -v', allow: ['split_lr', 'split_tb'], show: ['split_lr', 'split_tb'],
       // The shape is read around the pane the question started in: a new
       // left-right split with it on the left and a top-bottom pair on the right.
       goal: function () {
@@ -1571,7 +1586,7 @@
       }
     },
     two_akima: {
-      text: 'ペインを二つ閉じる', cmd: 'kill-pane ×2', allow: ['close'], show: ['focus', 'close'],
+      steps: 8, text: 'ペインを二つ閉じる', cmd: 'kill-pane ×2', allow: ['close'], show: ['focus', 'close'],
       goal: function () { return S.q0.filter(paneExists).map(function (id) { return { pane: id, mark: 'close', tag: '閉じる' }; }); },
       setup: function (r) {
         needUnzoom(); needPanes(3);
@@ -1593,7 +1608,7 @@
       }
     },
     new_and_home: {
-      text: '新しいウィンドウを作って、元のウィンドウに戻る', cmd: 'new-window → select-window', allow: ['new_window', 'select_window'], show: ['new_window', 'select_window'],
+      steps: 2, text: '新しいウィンドウを作って、元のウィンドウに戻る', cmd: 'new-window → select-window', allow: ['new_window', 'select_window'], show: ['new_window', 'select_window'],
       goal: function () { return S.q1 ? [{ tab: S.q0.home, tag: 'ここへ戻る' }] : [{ tab: '+', tag: '新しいウィンドウ' }]; },
       setup: function () {
         var win = T.activeWindow(S.session);
@@ -1610,11 +1625,11 @@
       next: function () { return S.q1 ? windowMove(S.q0.home, true) : mv(['c'], 'c を押す（新しいウィンドウ）'); }
     },
     swap_zoom: {
-      text: 'ペインを左上まで動かして全画面にする', cmd: 'swap-pane → resize-pane -Z', allow: ['swap', 'zoom'], show: ['swap', 'zoom'],
+      steps: 4, text: 'ペインを左上まで動かして全画面にする', cmd: 'swap-pane → resize-pane -Z', allow: ['swap', 'zoom'], show: ['swap', 'zoom'],
       goal: function () { return isFirst(S.target) ? [{ pane: S.target, mark: 'zoom', tag: 'ここを全画面に' }] : [{ pane: S.target, mark: 'to-left', tag: '左上へ' }]; },
       setup: function (r) {
         needUnzoom(); needPanes(2);
-        var p = isFirst(activeId()) ? pick(r, otherPanes()) : T.activePane(T.activeWindow(S.session));
+        var p = swapTarget(r);
         S.target = p.id;
         S.qText = function () { return tx('{0} を左上まで動かして全画面にする', paneLabel(p)); };
       },
@@ -1674,7 +1689,8 @@
     if (b.course.practice) { b.ghost = null; return; }
     var own = REC.ghostOf(b.course.id);
     b.ghost = own;
-    if (!NET || !NET.state().key) return;
+    // Today's fastest ran today's order; a shuffled run races only its own.
+    if (!NET || !NET.state().key || b.shuffled) return;
     NET.ghost(b.course.id, 'today').then(function (g) {
       if (!g || S.run !== b || (own && own.time <= g.time) || (g.splits || []).length !== b.qs.length) return;
       var me = NET.state().name;
@@ -1695,13 +1711,16 @@
   // The questions of a run. A house asks the same questions every time, in
   // today's order: the same for everyone on the same day (Japan time), so
   // the ランキング compares like with like. The 苦手の稽古 asks your weakest types.
-  function questionsFor(course, day) {
+  // 順番を変えて (`shuffled`) asks in a fresh order instead, so a replay is
+  // not from memory; such a run is kept but never sent to the ranking.
+  function questionsFor(course, day, shuffled) {
     if (course.practice) {
       var weak = REC.weakTypes(3);
       var list = [];
       weak.forEach(function (t) { list.push(t, t, t); });
       return pairZoom(shuffle(list));
     }
+    if (shuffled) return pairZoom(shuffle(course.qs.slice()));
     return pairZoom(shuffle(course.qs.slice(), rng(day + ':' + course.id)));
   }
 
@@ -1721,24 +1740,30 @@
     return out;
   }
 
-  function prepareRun(courseId) {
+  function prepareRun(courseId, opts) {
     var course = REC.courseOf(courseId) || REC.courseOf('easy');
     var day = LV.dayKey();
+    var shuffled = !!(opts && opts.shuffle) && !course.practice;
+    var qs = questionsFor(course, day, shuffled);
     S.run = {
       course: course,
       day: day,
-      qs: questionsFor(course, day),
+      qs: qs,
+      shuffled: shuffled,
       // Question types learnt before this run: their 手順 stays folded.
       learnt: REC.learnt(),
-      limit: course.limit,
+      // The 目安 of the question being asked (loadQuestion sets each).
+      limit: qLimit(qs[0]),
       i: 0,
       phase: 'ready',
       penalty: 0, misses: 0, overs: 0, guides: 0, keys: 0,
+      // Tab switches: how many, and the seconds the clock stood still.
+      pauses: 0, paused: 0,
       start: 0, qStart: 0, end: 0,
       stage: 0,
       ghostDiff: null,
       // Today's rooms are the same for everyone too.
-      seed: course.practice ? course.id + ':' + Math.random() : day + ':' + course.id
+      seed: course.practice || shuffled ? course.id + ':' + Math.random() : day + ':' + course.id
     };
     pickGhost(S.run);
     prepGhost(S.run);
@@ -1749,6 +1774,7 @@
     b.phase = 'count';
     b.i = 0;
     b.penalty = 0; b.misses = 0; b.overs = 0; b.guides = 0; b.keys = 0;
+    b.pauses = 0; b.paused = 0;
     b.streak = 0;
     b.qlog = [];
     $('#sashizu').dataset.key = '';
@@ -1780,6 +1806,7 @@
     if (!b || b.phase !== 'play' || S.screen !== 'game') return;
     b.phase = 'pause';
     b.pausedAt = performance.now();
+    b.pauses += 1;
     clearInterval(S.clock);
     S.armed = false;
     AU.stop();
@@ -1793,6 +1820,7 @@
     var d = performance.now() - b.pausedAt;
     b.start += d;
     b.qStart += d;
+    b.paused += d / 1000;
     b.phase = 'play';
     $('#pause').hidden = true;
     $('#sashizu').dataset.key = '';
@@ -1828,8 +1856,10 @@
     b.type = type;
     b.stage = 0;
     b.peek = false;
+    b.limit = qLimit(type);
     b.qStart = performance.now();
-    b.qlog[b.i] = { t: type, s: null, m: 0 };
+    // `l` is this question's 目安: the records measure it against that.
+    b.qlog[b.i] = { t: type, s: null, m: 0, l: b.limit };
     S.clipboard = '';
   }
 
@@ -1913,7 +1943,8 @@
       var used = (performance.now() - b.qStart) / 1000;
       var stage = used > b.limit ? 1 : 0;
       // A learnt question: try from memory first, the steps come after a few seconds.
-      if (!b.peek && used > LV.PEEK_AFTER && folded(b)) { b.peek = true; renderSashizu(); renderTerm(); renderTabArrow(); }
+      // Shown, the solve no longer counts as from memory (`g`, records.js).
+      if (!b.peek && used > LV.PEEK_AFTER && folded(b)) { b.peek = true; b.qlog[b.i].g = 1; b.guides += 1; renderSashizu(); renderTerm(); renderTabArrow(); }
       if (stage > b.stage) {
         var log = b.qlog[b.i];
         if (b.stage < 1) { b.overs += 1; log.o = 1; b.streak = 0; }
@@ -1937,14 +1968,17 @@
     b.end = performance.now();
     var raw = (b.end - b.start) / 1000;
     var time = raw + b.penalty;
+    var paused = +b.paused.toFixed(1);
     var result = {
       course: b.course.id, time: time, raw: raw, misses: b.misses, overs: b.overs, guides: b.guides,
-      keys: b.keys, n: b.qs.length, avg: time / b.qs.length, qlog: b.qlog, limit: b.limit
+      keys: b.keys, n: b.qs.length, avg: time / b.qs.length, qlog: b.qlog,
+      pauses: b.pauses, paused: paused, shuffled: b.shuffled
     };
     var sum = REC.add({
       course: b.course.id, prefix: S.conf ? S.conf.prefix.label : 'C-b', conf: S.conf ? 1 : undefined,
       time: +time.toFixed(2), raw: +raw.toFixed(2), misses: b.misses, overs: b.overs, guides: b.guides,
-      keys: b.keys, n: b.qs.length, qs: b.qlog
+      keys: b.keys, n: b.qs.length, qs: b.qlog,
+      pauses: b.pauses || undefined, paused: paused || undefined, shuffled: b.shuffled || undefined
     });
     for (var k in sum) result[k] = sum[k];
     // The question that ran longest past its 目安, to practise next.
@@ -2002,6 +2036,12 @@
   function ao5(runs) {
     if (runs.length < 5) return null;
     return runs.slice(0, 5).reduce(function (s, r) { return s + r.time; }, 0) / 5;
+  }
+
+  // The shortest and longest 目安 among a course's questions.
+  function limitRange(c) {
+    var ls = c.qs.map(qLimit);
+    return [Math.min.apply(null, ls), Math.max.apply(null, ls)];
   }
 
   function lastCourse(all) {
@@ -2085,7 +2125,7 @@
         '<span class="wing-main"><span class="wing-name">' + esc(c.title) +
         '<span class="wing-n">' + tx('{0} 問題', c.qs.length) + '</span>' +
         '<span class="wing-mode' + (c.recommended ? ' rec' : '') + '">' + esc(c.mode) + '</span></span>' +
-        '<span class="wing-desc">' + tx('目安 {0} 秒／問。', c.limit) + esc(c.desc) + '</span></span>' +
+        '<span class="wing-desc">' + tx('目安は 1 問 {0}〜{1} 秒。', limitRange(c)[0], limitRange(c)[1]) + esc(c.desc) + '</span></span>' +
         '<span class="wing-best"><small>' + tx('自己ベスト') + '</small><b>' + (best ? fmt(best.time) : '—') + '</b>' +
         '<small>' + (runs.length ? (a5 != null ? tx('五回平均 {0} ・ ', a5.toFixed(1)) : '') + tx('{0} 回', runs.length) : tx('お手本 {0} 秒', LV.par(c))) + '</small>' +
         '<small class="wing-top" data-top="' + c.id + '">' + topHTML(c.id) + '</small></span>' +
@@ -3023,11 +3063,11 @@
     if (name !== 'result') music();
   }
 
-  function startRun(courseId) {
+  function startRun(courseId, opts) {
     store.save({ prefix: S.prefix });
     S.result = null;
     buildHouse();
-    prepareRun(courseId);
+    prepareRun(courseId, opts);
     $('#chips').innerHTML = '';
     $('#playbar').dataset.key = '';
     showScreen('game');
@@ -3113,6 +3153,7 @@
       (r.spark && r.spark.length > 1 ? '<span class="spark-key"><i class="rec"></i>' + tx('自己ベスト') + ' <i class="now"></i>' + tx('今回') + '</span>' : '') + '</div>' +
       (r.tip ? '<div class="tips"><div class="tips-head">' + tx('豆知識') + '</div><p>' + esc(r.tip) + '</p></div>' : '') +
       '<div class="cta"><button type="button" class="btn primary" data-course="' + r.course + '">' + (c.practice ? tx('もう一度 稽古') : tx('もう一度')) + '<kbd class="hk">Enter</kbd></button>' +
+      (!c.practice ? '<button type="button" class="btn" data-course="' + r.course + '" data-shuffle="1">' + tx('順番を変えて') + '</button>' : '') +
       (!c.practice && REC.weakTypes(3).length ? '<button type="button" class="btn" data-course="keiko">' + tx('苦手を稽古') + '<kbd class="hk">K</kbd></button>' : '') +
       '<button type="button" class="btn" data-records="' + (c.practice ? lastCourse(REC.load()) : r.course) + '">' + tx('記録を見る') + '<kbd class="hk">R</kbd></button>' +
       '<button type="button" class="btn ghost" data-title="1">' + tx('コース選択へ') + '<kbd class="hk">Esc</kbd></button></div>';
@@ -3137,10 +3178,12 @@
   function shareRun(runId) {
     var r = S.result;
     if (!NET || !r) return;
+    // 稽古 is kept in step between devices but never goes on the boards;
+    // nor does a run in a changed order, or one paused for long.
+    var why = REC.courseOf(r.course).practice ? 'practice' : r.shuffled ? 'shuffled' : r.paused > LV.PAUSE_MAX ? 'paused' : null;
+    if (why) { if (why !== 'practice') r.board = { state: why }; if (NET.state().key) NET.sync().catch(function () {}); return; }
     // Nothing leaves the browser until the player gives a name or a 合言葉.
-    if (!NET.state().key) { r.board = REC.courseOf(r.course).practice ? null : { state: 'noname' }; return; }
-    // 稽古 is kept in step between devices but never goes on the boards.
-    if (REC.courseOf(r.course).practice) { NET.sync().catch(function () {}); return; }
+    if (!NET.state().key) { r.board = { state: 'noname' }; return; }
     var run = (REC.load().runs || []).filter(function (x) { return x.id === runId; })[0];
     r.board = { state: NET.state().name ? 'sending' : 'noname' };
     NET.sync().then(function () {
@@ -3160,7 +3203,7 @@
   function shareText(r) {
     var c = REC.courseOf(r.course);
     var sq = (r.qlog || []).map(function (q) {
-      return q.m || q.o ? '🟥' : q.s != null && q.s <= r.limit / 2 ? '🟩' : '🟨';
+      return q.m || q.o ? '🟥' : q.s != null && q.s <= REC.limitOf(q, c) / 2 ? '🟩' : '🟨';
     });
     var rows = [];
     for (var i = 0; i < sq.length; i += 10) rows.push(sq.slice(i, i + 10).join(''));
@@ -3219,6 +3262,8 @@
     if (b.state === 'sending') html += '<p class="em-board">' + tx('今日のランキングに載せている……') + '</p>';
     if (b.state === 'ok') html += '<p class="em-board">' + tx('今日のランキング <b>{0} 位</b> ／ {1} 人', b.rank, b.total) + ' ・ <a href="#" data-board="' + r.course + '">' + tx('ランキングを見る') + '</a></p>';
     if (b.state === 'refused') html += '<p class="em-board dim">' + tx('この記録はランキングに載せられなかった（手で解いた記録だけが載る）。') + '</p>';
+    if (b.state === 'paused') html += '<p class="em-board dim">' + tx('途中で {0} 秒 止まっていたので、今日のランキングには載せない（記録には残る）。', r.paused.toFixed(1)) + '</p>';
+    if (b.state === 'shuffled') html += '<p class="em-board dim">' + tx('順番を変えた回は、今日のランキングには載せない（記録には残る）。') + '</p>';
     if (b.state === 'noname') {
       html += '<form class="em-board name-form" data-name-form="result"><label>' + tx('名前を付けると、今日のランキングに載る') + '</label>' +
         '<span class="nf-row"><input name="name" maxlength="12" autocomplete="nickname" placeholder="' + tx('名前（12 文字まで）') + '"><button type="submit" class="btn">' + tx('ランキングに載せる') + '</button></span>' +
@@ -3448,8 +3493,8 @@
         '<span class="w-num">' + tx('平均 {0}秒 ・ 違い {1}%', e.avg.toFixed(1), Math.round(e.missRate * 100)) + (e.overs ? tx(' ・ 目安超え {0}', e.overs) : '') + '</span>' +
         '<span class="w-keys"><kbd class="pfx">' + esc(prefixLabel()) + '</kbd><span class="arr">→</span>' + keycaps(keys) + '</span></li>';
     };
-    return '<div class="rec-panel rec-weak"><div class="rec-head">' + tx('目安を超えがちな問題（直近 {0} 回）', w.runs) + '</div><ol class="weak-list">' +
-      w.weak.map(row).join('') + '</ol>' +
+    return '<div class="rec-panel rec-weak"><div class="rec-head">' + tx('目安を超えがちな問題（直近 {0} 回）', w.runs) + '</div>' +
+      (w.weak.length ? '<ol class="weak-list">' + w.weak.map(row).join('') + '</ol>' : '<p class="rec-empty">' + tx('目安を超えがちな問題はない。') + '</p>') +
       (w.strong ? '<p class="w-strong">' + tx('得意: ') + '<b>' + esc(tx(Q[w.strong.type].text)) + '</b> ' + tx('平均 {0}秒', w.strong.avg.toFixed(1)) + '</p>' : '') +
       (REC.weakTypes(3).length ? '<div class="cta"><button type="button" class="btn" data-course="keiko">' + tx('苦手だけ稽古する（{0}）', REC.weakTypes(3).map(typeName).join(tx('・'))) + '</button></div>' : '') +
       '</div>';
@@ -3563,7 +3608,7 @@
       var bd = e.target.closest('[data-board]');
       if (bd) { e.preventDefault(); S.recTab = 'board'; S.boardSpan = 'today'; openRecords(bd.dataset.board, 'result'); return; }
       var b = e.target.closest('[data-course]');
-      if (b) { startRun(b.dataset.course); return; }
+      if (b) { startRun(b.dataset.course, { shuffle: !!b.dataset.shuffle }); return; }
       if (e.target.closest('[data-title]')) showScreen('title');
     });
     $('#records-screen').addEventListener('click', function (e) {
@@ -3670,7 +3715,8 @@
           clipboard: S.clipboard,
           run: b ? {
             course: b.course.id, phase: b.phase, i: b.i, n: b.qs.length, type: b.type, misses: b.misses,
-            stage: b.stage, overs: b.overs, guides: b.guides,
+            stage: b.stage, overs: b.overs, guides: b.guides, limit: b.limit,
+            shuffled: b.shuffled, pauses: b.pauses, paused: b.paused,
             order: b.q ? qText(b) : null,
             qs: b.qs.slice(), day: b.day,
             folded: b.q && b.phase === 'play' ? folded(b) : false,

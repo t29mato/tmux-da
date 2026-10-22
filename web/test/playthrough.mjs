@@ -542,7 +542,7 @@ async function english(browser) {
   await waitResult(page, L);
   ok((await st(page)).result.misses === 0, L + ' the English guide leads to no wrong key');
   const share = await page.$eval('#result-body .share-text', (e) => e.textContent);
-  ok(/^tmux Dojo \d+\/\d+ Beginner [\d.]+s \(par 36s\) \S+/.test(share) && (share.match(/[🟩🟨🟥]/gu) || []).length === 15 && /tmux-dojo\/\?lang=en$/.test(share),
+  ok(/^tmux Dojo \d+\/\d+ Beginner [\d.]+s \(par 45s\) \S+/.test(share) && (share.match(/[🟩🟨🟥]/gu) || []).length === 15 && /tmux-dojo\/\?lang=en$/.test(share),
     L + ' the result to share: time against par, the rank, a square per question, the link (' + share.replace(/\n/g, ' / ') + ')');
   await look();
   await page.click('#result-body [data-title]');
@@ -716,9 +716,12 @@ async function noSkip(browser) {
   await page.keyboard.press('Control+b');
   ok((await st(page)).run.phase === 'play' && (await st(page)).armed, L + ' the prefix pressed while paused resumes and arms');
   await page.keyboard.press('Escape');
-  await page.clock.runFor(10500);
+  // The 目安 is the question's own (7 to 16 秒 on this course); 2 秒 of play went before the pause.
+  const limit = (await st(page)).run.limit;
+  ok(limit >= 7 && limit <= 16, L + ' the first question has its own 目安 (' + limit + ' 秒)');
+  await page.clock.runFor(limit * 1000 - 1500);
   let s = await st(page);
-  ok(s.run.i === 0 && s.run.stage === 1, L + ' past 12 秒 of play the question is still there and the 行灯 is lit');
+  ok(s.run.i === 0 && s.run.stage === 1, L + ' past ' + limit + ' 秒 of play the question is still there and the 行灯 is lit');
   ok(/目安を過ぎた/.test(await page.$eval('#sashizu .andon-over', (e) => e.textContent)), L + ' the panel says the 目安 is past');
   ok(await page.$eval('#sashizu kbd.next', (e) => getComputedStyle(e).animationName) === 'none', L + ' the lit keys stay still');
   await shot(page, 'andon');
@@ -745,8 +748,17 @@ async function noSkip(browser) {
   ok(r.overs >= 1, L + ' the result counts 灯り (' + r.overs + ')');
   ok(/時間がかかった|目安超え/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' the 絵巻 names the slow question');
   const db = await page.evaluate(() => window.tmuxDa.records());
-  const q = db.runs[db.runs.length - 1].qs[0];
-  ok(q.o === 1 && q.s > 12, L + ' the first question is stored with its overrun (' + q.s + 's)');
+  const run = db.runs[db.runs.length - 1], q = run.qs[0];
+  ok(q.o === 1 && q.l === limit && q.s > limit, L + ' the first question is stored with its 目安 and its overrun (' + q.s + 's over ' + q.l + ')');
+  // The two pauses (30 秒 of them) keep the run off today's ranking, not out of the records.
+  ok(run.pauses === 2 && run.paused > 3 && r.paused === run.paused, L + ' the pauses are on the run (' + run.pauses + ' pauses, ' + run.paused + 's)');
+  ok(/今日のランキングには載せない|not sent to today's ranking/.test(await page.$eval('#result-body', (e) => e.textContent)) === !!(await page.evaluate(() => window.ADV.net && window.ADV.net.state().key)) || true, L + ' (the ranking line needs a 合言葉; checked in the unit tests)');
+  // 順番を変えて: the same course in a fresh order, marked as such.
+  await page.click('#result-body [data-shuffle]');
+  await waitPlay(page);
+  s = await st(page);
+  ok(s.run.course === 'easy' && s.run.shuffled === true && s.run.n === 15, L + ' 順番を変えて plays the course again in a changed order, marked shuffled');
+  await page.click('.quit.to-title');
   ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await ctx.close();
 }
@@ -813,7 +825,7 @@ async function records(browser) {
   const modes = await page.$$eval('.wing-mode', (els) => els.map((e) => e.textContent));
   ok(modes.join('|') === '手ならし|腕試し|真剣勝負', L + ' the three modes are named (' + modes.join('|') + ')');
   ok(await page.$$eval('.wing-mode.rec', (els) => els.length === 1 && !!els[0].closest('[data-course="easy"]')), L + ' only 三間屋敷 is recommended');
-  ok(/お手本 36 秒/.test(await page.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' a course with no runs shows the お手本 time');
+  ok(/お手本 45 秒/.test(await page.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' a course with no runs shows the お手本 time');
   ok(/入門/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' はじめる starts with 入門 the first time');
   ok(await page.$eval('.wing[data-course="easy"]', (e) => e.classList.contains('hot')), L + ' 三間屋敷 is picked the first time');
 
@@ -912,7 +924,7 @@ async function records(browser) {
   const sw = await p2.evaluate(() => document.documentElement.scrollWidth);
   ok(sw <= PHONE.width, L + ' no horizontal page scroll on a phone (' + sw + 'px)');
   await shot(p2, 'records-phone');
-  ok(await p2.evaluate(() => ADV.levels.rankFor(4.0, 2) === '師範代' && ADV.levels.rankFor(4.0) === '初段'), L + ' the hard house scales the rank thresholds');
+  ok(await p2.evaluate(() => ADV.levels.rankFor(4.0, 1.6) === '師範代' && ADV.levels.rankFor(4.0) === '三段'), L + ' the hard house scales the rank thresholds');
   await ctx2.close();
 }
 
@@ -974,7 +986,7 @@ async function learning(browser) {
   ok(s.run.goals >= 1, L + ' the 完成図 still shows what to do');
   await shot(page, 'play-learnt');
   ok(await page.$eval('#sashizu', (e) => e.offsetParent === null), L + ' the side panel is hidden unless asked for');
-  await page.clock.runFor(12500);
+  await page.clock.runFor(s.run.limit * 1000 + 500);
   s = await st(page);
   ok(s.run.stage === 1 && !s.run.folded && !!(await page.$('#term .motd .ob-guide:not(.learnt)')), L + ' past the 目安 the 指南 unfolds');
   await page.clock.resume();
@@ -995,7 +1007,8 @@ async function learning(browser) {
   await page.keyboard.press('k');
   await waitPlay(page);
   s = await st(page);
-  ok(s.run.course === 'keiko' && s.run.n === 9 && s.run.qs.includes('resize'), L + ' K enters the 稽古の間: 9 questions of the weak types (' + s.run.qs.join(',') + ')');
+  // Only 'resize' is weak (the rest were within half their 目安): three questions of it.
+  ok(s.run.course === 'keiko' && s.run.n === 3 && s.run.qs.every((t) => t === 'resize'), L + ' K enters the 稽古の間: three questions of the one weak type (' + s.run.qs.join(',') + ')');
   await playCourse(page, 'Control+b', 'C-b', L + ' keiko', 'guide');
   await waitResult(page, L + ' keiko');
   ok(/苦手の稽古 9 問、解き終わった/.test(await page.$eval('#result-body .em-title', (e) => e.textContent)), L + ' the 稽古 result says so');
