@@ -542,7 +542,7 @@ async function english(browser) {
   await waitResult(page, L);
   ok((await st(page)).result.misses === 0, L + ' the English guide leads to no wrong key');
   const share = await page.$eval('#result-body .share-text', (e) => e.textContent);
-  ok(/^tmux Dojo \d+\/\d+ Beginner [\d.]+s \(par 36s\) \S+/.test(share) && (share.match(/[🟩🟨🟥]/gu) || []).length === 15 && /tmux-dojo\/\?lang=en$/.test(share),
+  ok(/^tmux Dojo \d+\/\d+ Beginner [\d.]+s \(par 45s\) \S+/.test(share) && (share.match(/[🟩🟨🟥]/gu) || []).length === 15 && /tmux-dojo\/\?lang=en$/.test(share),
     L + ' the result to share: time against par, the rank, a square per question, the link (' + share.replace(/\n/g, ' / ') + ')');
   await look();
   await page.click('#result-body [data-title]');
@@ -825,7 +825,7 @@ async function records(browser) {
   const modes = await page.$$eval('.wing-mode', (els) => els.map((e) => e.textContent));
   ok(modes.join('|') === '手ならし|腕試し|真剣勝負', L + ' the three modes are named (' + modes.join('|') + ')');
   ok(await page.$$eval('.wing-mode.rec', (els) => els.length === 1 && !!els[0].closest('[data-course="easy"]')), L + ' only 三間屋敷 is recommended');
-  ok(/お手本 36 秒/.test(await page.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' a course with no runs shows the お手本 time');
+  ok(/お手本 45 秒/.test(await page.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' a course with no runs shows the お手本 time');
   ok(/入門/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' はじめる starts with 入門 the first time');
   ok(await page.$eval('.wing[data-course="easy"]', (e) => e.classList.contains('hot')), L + ' 三間屋敷 is picked the first time');
 
@@ -924,7 +924,7 @@ async function records(browser) {
   const sw = await p2.evaluate(() => document.documentElement.scrollWidth);
   ok(sw <= PHONE.width, L + ' no horizontal page scroll on a phone (' + sw + 'px)');
   await shot(p2, 'records-phone');
-  ok(await p2.evaluate(() => ADV.levels.rankFor(4.0, 2) === '師範代' && ADV.levels.rankFor(4.0) === '初段'), L + ' the hard house scales the rank thresholds');
+  ok(await p2.evaluate(() => ADV.levels.rankFor(4.0, 1.6) === '師範代' && ADV.levels.rankFor(4.0) === '三段'), L + ' the hard house scales the rank thresholds');
   await ctx2.close();
 }
 
@@ -1008,7 +1008,8 @@ async function learning(browser) {
   await page.keyboard.press('k');
   await waitPlay(page);
   s = await st(page);
-  ok(s.run.course === 'keiko' && s.run.n === 9 && s.run.qs.includes('resize'), L + ' K enters the 稽古の間: 9 questions of the weak types (' + s.run.qs.join(',') + ')');
+  // Only 'resize' is weak (the rest were within half their 目安): three questions of it.
+  ok(s.run.course === 'keiko' && s.run.n === 3 && s.run.qs.every((t) => t === 'resize'), L + ' K enters the 稽古の間: three questions of the one weak type (' + s.run.qs.join(',') + ')');
   await playCourse(page, 'Control+b', 'C-b', L + ' keiko', 'guide');
   await waitResult(page, L + ' keiko');
   ok(/稽古を終えた/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' the 稽古 result says so');

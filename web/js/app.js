@@ -1455,7 +1455,7 @@
       next: function () { return moveTo(S.q0.id) || resizeMove(); }
     },
     swap: {
-      steps: 2, text: 'ペインを左上まで入れ替えて動かす（swap）', cmd: 'swap-pane -U', allow: ['swap'], show: ['swap'],
+      steps: 3, text: 'ペインを左上まで入れ替えて動かす（swap）', cmd: 'swap-pane -U', allow: ['swap'], show: ['swap'],
       goal: function () { return [{ pane: S.target, mark: 'to-left', tag: '左上へ' }]; },
       setup: function (r) {
         needUnzoom(); needPanes(2);
@@ -3106,12 +3106,12 @@
   function shareRun(runId) {
     var r = S.result;
     if (!NET || !r) return;
-    // Nothing leaves the browser until the player gives a name or a 合言葉.
-    if (!NET.state().key) { r.board = REC.courseOf(r.course).practice ? null : { state: 'noname' }; return; }
     // 稽古 is kept in step between devices but never goes on the boards;
     // nor does a run in a changed order, or one paused for long.
     var why = REC.courseOf(r.course).practice ? 'practice' : r.shuffled ? 'shuffled' : r.paused > LV.PAUSE_MAX ? 'paused' : null;
-    if (why) { if (why !== 'practice') r.board = { state: why }; NET.sync().catch(function () {}); return; }
+    if (why) { if (why !== 'practice') r.board = { state: why }; if (NET.state().key) NET.sync().catch(function () {}); return; }
+    // Nothing leaves the browser until the player gives a name or a 合言葉.
+    if (!NET.state().key) { r.board = { state: 'noname' }; return; }
     var run = (REC.load().runs || []).filter(function (x) { return x.id === runId; })[0];
     r.board = { state: NET.state().name ? 'sending' : 'noname' };
     NET.sync().then(function () {

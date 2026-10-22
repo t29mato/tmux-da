@@ -186,16 +186,21 @@ test('weakTypes and weakness: nothing is weak when every type is within its 目�
   REC.add(even());
   assert.deepEqual(plain(REC.weakTypes(3)), []);
   assert.deepEqual(plain(REC.weakness('easy').weak), [], 'the records panel lists none either');
-  // Clearly slow next to the others (over 1.3 times the mean, relative to the 目安): weak.
-  const slow = { ...run(30), qs: [
+  // Clearly slow: past half its 目安 and over 1.3 times the others' pace (relative to the 目安).
+  const slow = (s) => ({ ...run(30), qs: [
     ...Array.from({ length: 6 }, () => ({ t: 'zoom', s: 1, m: 0, l: 7 })),
-    ...Array.from({ length: 6 }, () => ({ t: 'focus', s: 5, m: 0, l: 10 }))
-  ] };
+    ...Array.from({ length: 6 }, () => ({ t: 'focus', s, m: 0, l: 10 }))
+  ] });
   const R2 = fresh();
-  R2.add(slow); R2.add(slow);
+  R2.add(slow(6)); R2.add(slow(6));
   assert.deepEqual(plain(R2.weakTypes(3)), ['focus']);
   assert.equal(R2.weakness('easy').weak[0].type, 'focus');
   assert.ok(R2.weakness('easy').weak[0].ratio > R2.WEAK_RATIO);
+  // Quick hands: 0.3 against 0.1 秒 is three times the pace, but nowhere near the 目安.
+  const R3 = fresh();
+  R3.add(slow(0.3)); R3.add(slow(0.3));
+  assert.deepEqual(plain(R3.weakTypes(3)), []);
+  assert.deepEqual(plain(R3.weakness('easy').weak), []);
 });
 
 test('skill: the pace of the latest five runs gives the 腕前', () => {

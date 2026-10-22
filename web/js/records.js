@@ -179,8 +179,10 @@
   }
 
   // A type is weak when it ran past its 目安, took a wrong key, or is clearly
-  // slow next to the others (relative to its 目安); never from nothing.
+  // slow: past half its 目安 on average and over WEAK_RATIO times the pace of
+  // the rest (each relative to its 目安). Never from nothing.
   var WEAK_RATIO = 1.3;
+  function slow(rel, ratio) { return rel > 0.5 && ratio > WEAK_RATIO; }
 
   // Per question type over the latest n runs that logged questions. `o` marks
   // a question that ran past its 目安, `g` one where the 手順 came out; `to`
@@ -204,10 +206,10 @@
     var mean = count ? total / count : 0;
     var list = Object.keys(by).map(function (k) {
       var e = by[k];
-      return { type: e.type, avg: e.sum / e.n, missRate: e.m / e.n, overs: e.overs, guides: e.guides, n: e.n, ratio: mean ? (e.rel / e.n) / mean : 1 };
+      return { type: e.type, avg: e.sum / e.n, rel: e.rel / e.n, missRate: e.m / e.n, overs: e.overs, guides: e.guides, n: e.n, ratio: mean ? (e.rel / e.n) / mean : 1 };
     }).filter(function (e) { return e.n >= 2; });
     list.sort(function (a, b) { return b.ratio - a.ratio; });
-    var weak = list.filter(function (e) { return e.overs > 0 || e.missRate > 0 || e.ratio > WEAK_RATIO; });
+    var weak = list.filter(function (e) { return e.overs > 0 || e.missRate > 0 || slow(e.rel, e.ratio); });
     return { runs: runs.length, mean: mean, weak: weak.slice(0, 3), strong: list.length > 3 ? list[list.length - 1] : null };
   }
 
@@ -244,8 +246,8 @@
   }
 
   // The question types to practise, over the latest 60 logged questions:
-  // only those that ran past the 目安 or are clearly slow (relative to
-  // their 目安) next to the rest, worst first. At most `n`; often none.
+  // only those that ran past the 目安 or are clearly slow (`slow` above),
+  // worst first. At most `n`; often none.
   function weakTypes(n) {
     var qs = allQuestions().slice(-60);
     if (qs.length < 5) return [];
@@ -256,8 +258,8 @@
       e.sum += rel; e.n += 1; e.overs += q.o ? 1 : 0; total += rel;
     });
     var mean = total / qs.length;
-    var list = Object.keys(by).map(function (k) { var e = by[k]; return { type: e.type, ratio: e.sum / e.n / mean, overs: e.overs, score: e.sum / e.n / mean + e.overs / e.n, n: e.n }; });
-    list = list.filter(function (e) { return e.overs > 0 || e.ratio > WEAK_RATIO; });
+    var list = Object.keys(by).map(function (k) { var e = by[k]; return { type: e.type, rel: e.sum / e.n, ratio: e.sum / e.n / mean, overs: e.overs, score: e.sum / e.n / mean + e.overs / e.n, n: e.n }; });
+    list = list.filter(function (e) { return e.overs > 0 || slow(e.rel, e.ratio); });
     list.sort(function (a, b) { return b.score - a.score; });
     return list.slice(0, n || 3).map(function (e) { return e.type; });
   }
