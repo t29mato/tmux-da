@@ -262,3 +262,67 @@ test('streak: days in a row (Japan time), alive until midnight even before today
   assert.deepEqual(plain(REC.streak(null, new Date('2026-10-22T05:00:00Z'))), { days: 4, today: true });
   assert.deepEqual(plain(REC.streak(null, new Date('2026-10-24T05:00:00Z'))), { days: 0, today: false });
 });
+
+// ---- 稽古 (the recall drill) ----------------------------------------------------
+
+test('drillWeight: frequency times weakness; unseen types weigh double, a type just asked weighs half', () => {
+  const REC = fresh();
+  const recent = [{ t: 'focus', s: 1 }, { t: 'resize', s: 9, o: 1 }, { t: 'resize', s: 3, m: 1 }, { t: 'rename', s: 2, g: 1 }];
+  assert.equal(REC.drillWeight('zoom', recent), 3 * 2, 'never seen: freq 3 × 2');
+  assert.equal(REC.drillWeight('trident', recent), 1 * 2, 'a rare combo never seen: 1 × 2');
+  // resize: freq 2, both bad (×4), last asked one question ago (gap 1 → 0.5 + 0.5 × 1/40).
+  assert.ok(Math.abs(REC.drillWeight('resize', recent) - 2 * 4 * (0.5 + 0.5 / 40)) < 1e-9);
+  // focus: freq 3, clean (×1), gap 3.
+  assert.ok(Math.abs(REC.drillWeight('focus', recent) - 3 * (0.5 + 0.5 * 3 / 40)) < 1e-9);
+  // rename: a peek counts as bad.
+  assert.ok(Math.abs(REC.drillWeight('rename', recent) - 2 * 4 * 0.5) < 1e-9);
+  // Far back: no spacing penalty left.
+  const far = [{ t: 'focus', s: 1 }].concat(Array.from({ length: 50 }, () => ({ t: 'zoom', s: 1 })));
+  assert.equal(REC.drillWeight('focus', far), 3);
+});
+
+test('drillPick: never the same type twice in a row; weights steer the choice', () => {
+  const REC = fresh();
+  const types = ['focus', 'resize', 'trident'];
+  const recent = [{ t: 'resize', s: 9, o: 1 }];
+  let last = null;
+  const counts = { focus: 0, resize: 0, trident: 0 };
+  // A fixed sequence of "random" numbers stands in for Math.random.
+  let k = 0;
+  const rand = () => ((k++ * 7919) % 1000) / 1000;
+  for (let i = 0; i < 300; i++) {
+    const t = REC.drillPick(types, recent, last, rand);
+    assert.notEqual(t, last, 'no repeat');
+    assert.ok(types.includes(t));
+    counts[t]++;
+    last = t;
+  }
+  assert.ok(counts.focus > counts.trident, 'the frequent key comes more often than the rare combo: ' + JSON.stringify(counts));
+  assert.equal(REC.drillPick(['focus'], recent, 'focus', rand), 'focus', 'one type only: it must repeat');
+});
+
+test('drillStreak and drillBest: the longest run from memory, over drill runs only', () => {
+  const REC = fresh();
+  const clean = (t) => ({ t, s: 1.5, m: 0 });
+  assert.equal(REC.drillStreak([clean('focus'), clean('zoom'), { t: 'resize', s: 5, g: 1 }, clean('focus'), clean('close'), clean('zoom')]), 3);
+  assert.equal(REC.drillStreak([clean('focus'), { t: 'zoom', s: 1, m: 1 }, { t: 'zoom', s: 9, o: 1 }]), 1);
+  assert.equal(REC.drillBest(), 0);
+  // An old 苦手の稽古 run (no `drill`) does not count, nor a course run.
+  REC.add({ ...run(30), course: 'keiko', n: 3, qs: [clean('resize'), clean('resize'), clean('resize')] });
+  REC.add(run(30));
+  assert.equal(REC.drillBest(), 0);
+  REC.add({ ...run(20), course: 'keiko', drill: true, n: 4, qs: [clean('focus'), clean('zoom'), { t: 'resize', s: 5, g: 1 }, clean('focus')] });
+  assert.equal(REC.drillBest(), 2);
+  REC.add({ ...run(20), course: 'keiko', drill: true, n: 5, qs: [clean('focus'), clean('zoom'), clean('close'), clean('focus'), clean('split_lr')] });
+  assert.equal(REC.drillBest(), 5);
+  assert.equal(REC.skill().runs, 1, 'drills do not count towards the 腕前');
+});
+
+test('drillRecent: the latest logged questions with the drill\'s own after them', () => {
+  const REC = fresh();
+  REC.add(run(30));
+  const r = REC.drillRecent([{ t: 'zoom', s: 1, m: 0 }]);
+  assert.equal(r.length, 16);
+  assert.equal(r[15].t, 'zoom');
+  assert.equal(r[0].t, 'split_lr');
+});
