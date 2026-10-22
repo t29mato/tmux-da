@@ -569,5 +569,7 @@ window.ADV.EN = {
   "セッションの名前": "rename session",
   "新しいセッション": "new session",
   "ペインの名前": "rename pane",
-  "セッション一覧": "session list"
+  "セッション一覧": "session list",
+  // --- span ---
+  "最速 {0}": "Fastest {0}"
 };

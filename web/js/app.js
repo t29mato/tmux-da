@@ -2374,7 +2374,7 @@
   function topHTML(id) {
     var t = S.tops && S.tops[id];
     if (!t) return '';
-    return esc(tx('今日の一番 {0}', tx('{0}秒', t.time.toFixed(1))));
+    return esc(tx('最速 {0}', tx('{0}秒', t.time.toFixed(1))));
   }
 
   // Reading the boards sends nothing of the player's; only from the site.
@@ -2383,7 +2383,7 @@
     S.topsAt = Date.now();
     S.tops = S.tops || {};
     LV.COURSES.forEach(function (c) {
-      NET.board(c.id, 'today').then(function (rows) {
+      NET.board(c.id, BOARD_SPAN).then(function (rows) {
         if (!rows.length) return;
         S.tops[c.id] = rows[0];
         var el = $('#course-list [data-top="' + c.id + '"]');
@@ -3675,7 +3675,7 @@
 
   // ランキング: each player's best for the course, today / this week / ever.
   function renderBoard(body, id) {
-    var span = S.boardSpan || 'today';
+    var span = S.boardSpan || BOARD_SPAN;
     var seg = '<div class="seg rec-span" role="group" aria-label="' + tx('期間') + '">' +
       [['today', '今日'], ['week', '今週'], ['all', '全期間']].map(function (x) {
         return '<button type="button" data-span="' + x[0] + '" aria-pressed="' + (x[0] === span ? 'true' : 'false') + '">' + tx(x[1]) + '</button>';
@@ -3703,7 +3703,7 @@
     NET.board(id, span).then(function (rows) {
       S.boardCache = S.boardCache || {};
       S.boardCache[key] = { rows: rows, at: Date.now() };
-      if (S.screen === 'records' && S.recTab === 'board' && S.recCourse === id && (S.boardSpan || 'today') === span) renderRecords();
+      if (S.screen === 'records' && S.recTab === 'board' && S.recCourse === id && (S.boardSpan || BOARD_SPAN) === span) renderRecords();
     }).catch(function () {
       var bb = $('#records-body .board-body');
       if (bb && !cached) bb.innerHTML = '<p class="rec-empty">' + tx('ランキングにつながらなかった。通信できるときにもう一度。') + '</p>';
@@ -3751,8 +3751,11 @@
 
   // Straight to the rankings, from the title: today's board of the course
   // you played last (入門 for a first visit).
+  // While few people play, the all-time board is the one with names on it.
+  var BOARD_SPAN = 'all';
+
   function openBoard() {
-    S.recTab = 'board'; S.boardSpan = 'today';
+    S.recTab = 'board'; S.boardSpan = BOARD_SPAN;
     openRecords(null, 'title');
   }
 
@@ -3985,7 +3988,7 @@
       var r = e.target.closest('[data-records]');
       if (r) { S.recTab = 'growth'; openRecords(r.dataset.records || null, 'result'); return; }
       var bd = e.target.closest('[data-board]');
-      if (bd) { e.preventDefault(); S.recTab = 'board'; S.boardSpan = 'today'; openRecords(bd.dataset.board, 'result'); return; }
+      if (bd) { e.preventDefault(); S.recTab = 'board'; S.boardSpan = BOARD_SPAN; openRecords(bd.dataset.board, 'result'); return; }
       var b = e.target.closest('[data-course]');
       if (b) { startRun(b.dataset.course, { shuffle: !!b.dataset.shuffle }); return; }
       if (e.target.closest('[data-title]')) showScreen('title');
