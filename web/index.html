@@ -19,7 +19,6 @@
   <div class="topbar-right">
     <span id="title-meta" class="meta"></span>
     <button type="button" class="lang-toggle" lang="en" aria-label="Switch to English">EN</button>
-    <button type="button" class="quiet-toggle" aria-pressed="true" data-t-aria="飾りを動かす" aria-label="飾りを動かす">静</button>
     <button type="button" class="sound-toggle" aria-pressed="true" data-t-aria="音を消す" aria-label="音を消す">♪</button>
     <button type="button" class="theme-toggle" data-t-aria="テーマを切り替える" aria-label="テーマを切り替える">☾</button>
   </div>
@@ -82,7 +81,7 @@
   </div>
   <div id="keybar" class="keybar" aria-label="画面上のキー" data-t-aria="画面上のキー"></div>
   <div class="game-foot">
-    <button type="button" class="btn ghost quit to-title" data-t>やめる</button>
+    <button type="button" class="btn ghost quit to-title" data-t data-t-title="Esc を 2 回続けて押してもやめられる" title="Esc を 2 回続けて押してもやめられる">やめる</button>
     <button type="button" class="btn ghost detail-toggle" aria-pressed="false">手順の詳細を出す</button>
   </div>
   <input id="sink" class="sink" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="キー入力" data-t-aria="キー入力" enterkeyhint="go">
@@ -91,18 +90,15 @@
 <!-- ===== result ===== -->
 <main id="result-screen" class="screen result" hidden>
   <div class="emaki">
-    <div class="rod" aria-hidden="true"></div>
     <section id="result-body" class="emaki-body"></section>
-    <div class="rod" aria-hidden="true"></div>
   </div>
 </main>
 
 <!-- ===== records ===== -->
 <main id="records-screen" class="screen records" hidden>
   <div class="emaki wide">
-    <div class="rod" aria-hidden="true"></div>
     <section class="emaki-body">
-      <div class="em-hd" data-t>絵 巻 ・ 記 録</div>
+      <div class="em-hd" data-t>記録</div>
       <h2 class="em-title" data-t>上達の記録</h2>
       <div class="seg rec-seg" role="group" aria-label="コース" data-t-aria="コース">
         <button type="button" data-rec-course="easy" aria-pressed="false"><span data-t>入門</span><small data-t>手ならし</small></button>
@@ -120,7 +116,6 @@
         <button type="button" id="btn-records-clear" class="btn ghost" data-t>記録を消す</button>
       </div>
     </section>
-    <div class="rod" aria-hidden="true"></div>
   </div>
 </main>
 
