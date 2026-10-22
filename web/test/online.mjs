@@ -22,6 +22,12 @@ const fakeRun = (secs) => ({
 });
 
 const browser = await chromium.launch();
+// The page picks its language from the browser: these checks read the
+// Japanese, so every page here is Japanese unless a test says otherwise.
+for (const fn of ['newContext', 'newPage']) {
+  const orig = browser[fn].bind(browser);
+  browser[fn] = (o = {}) => orig({ locale: 'ja-JP', ...o });
+}
 const open = async () => {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, reducedMotion: 'reduce' });
   const page = await ctx.newPage();

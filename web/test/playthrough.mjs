@@ -168,7 +168,7 @@ async function followGuide(page, prefix) {
   }
   const label = mv.keys[0];
   let m;
-  if (label === '0-9') await page.keyboard.press(/(\d+) を押す/.exec(mv.text)[1]);
+  if (label === '0-9') await page.keyboard.press(/(\d+) を押す|Press (\d+)/.exec(mv.text).slice(1).filter(Boolean)[0]);
   else if ((m = /^Ctrl\+([hjkl\\])$/.exec(label))) await page.keyboard.press('Control+' + (m[1] === '\\' ? 'Backslash' : m[1]));
   else if ((m = /^(Ctrl|Option)\+(.)$/.exec(label))) {
     const key = (m[1] === 'Ctrl' ? 'Control+' : 'Alt+') + ARROW[m[2]];
@@ -394,6 +394,59 @@ async function navigator(browser) {
 
 // A pasted .tmux.conf: its prefix and keys are the game's, the 指南 says
 // them, unknown lines are listed, and the run goes on the boards like any other.
+// In English (the browser's language): a whole course by the guide, the
+// result and the records, with no Japanese left on screen except the switch
+// back to 日本語, and no text missing from the English table.
+async function english(browser) {
+  const L = '[english]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce', locale: 'en-US' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  const missing = new Set();
+  page.on('console', (m) => { if (/\[i18n\]/.test(m.text())) missing.add(m.text()); });
+  const japanese = () => page.evaluate(() => {
+    const out = [];
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode());) {
+      const el = n.parentElement;
+      if (!el || el.closest('[hidden]') || el.closest('.lang-toggle') || !el.getClientRects().length) continue;
+      if (getComputedStyle(el).visibility === 'hidden') continue;
+      if (/[ぁ-んァ-ヶ一-龠]/.test(n.textContent)) out.push(n.textContent.trim().slice(0, 60));
+    }
+    return out;
+  });
+  const left = new Set();
+  const look = async () => { for (const t of await japanese()) left.add(t); };
+  await page.goto(PAGE);
+  ok(await page.evaluate(() => document.documentElement.lang) === 'en', L + ' an English browser gets the English page');
+  ok(/Start/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' the title says Start');
+  await look();
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  for (let guard = 0; guard < 400; guard++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    await look();
+    await followGuide(page, 'Control+b');
+  }
+  await waitResult(page, L);
+  ok((await st(page)).result.misses === 0, L + ' the English guide leads to no wrong key');
+  await look();
+  await page.click('#result-body [data-title]');
+  await page.click('#btn-records');
+  await look();
+  await page.click('[data-rec-tab="sync"]');
+  await look();
+  ok(!left.size, L + ' no Japanese on screen' + (left.size ? ': ' + [...left].join(' | ') : ''));
+  ok(!missing.size, L + ' every text has its English' + (missing.size ? ': ' + [...missing].join(' | ') : ''));
+  // The switch: to Japanese, and it stays.
+  await page.click('.lang-toggle');
+  await page.waitForFunction(() => document.documentElement.lang === 'ja');
+  ok(/はじめる/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' 日本語 switches the page to Japanese and it stays');
+  ok(!errors.length, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // The no-confirm button adds the two binds, and x closes without asking.
 async function noConfirm(browser) {
   const L = '[no confirm]';
@@ -975,6 +1028,7 @@ const parts = [
   ['navigator', navigator],
   ['ownconf', ownConf],
   ['noconfirm', noConfirm],
+  ['english', english],
   ['editing', lineEditing],
   ['records', records],
   ['learning', learning],
@@ -982,6 +1036,12 @@ const parts = [
   ['sound', sound]
 ];
 const browser = await chromium.launch();
+// The page picks its language from the browser: these checks read the
+// Japanese, so every page here is Japanese unless a test says otherwise.
+for (const fn of ['newContext', 'newPage']) {
+  const orig = browser[fn].bind(browser);
+  browser[fn] = (o = {}) => orig({ locale: 'ja-JP', ...o });
+}
 try {
   for (const [name, fn] of parts) if (!only.length || only.includes(name)) await fn(browser);
 } finally {
