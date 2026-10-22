@@ -1777,12 +1777,15 @@
         var h = T.findPane(S.session, S.q0.id);
         if (!h) return null;
         var p = h.pane;
+        // Back to the pane the line is in first.
+        var back = moveTo(S.q0.id);
+        if (back) return back;
         if (p.mode === 'copy') {
           if (p.sel == null) return mv(['Space'], 'Space を押す（選び始める）', true);
           return mv(['Enter'], 'Enter を押す（この行をコピーする）', true);
         }
-        if (S.clipboard) return moveTo(S.q0.id) || mv([']'], '] を押す（貼り付ける）');
-        return moveTo(S.q0.id) || mv(['['], '[ を押す（コピーモードに入る）');
+        if (S.clipboard) return mv([']'], '] を押す（貼り付ける）');
+        return mv(['['], '[ を押す（コピーモードに入る）');
       }
     }
   };
@@ -2823,6 +2826,10 @@
   }
 
   function pickerHTML() {
+    if (S.picker.kind === 'buffer') {
+      return '<div class="picker" role="listbox" aria-label="' + tx('バッファ') + '"><div class="picker-head">' + tx('(choose-buffer)  Enter で貼る') + '</div>' +
+        '<div class="picker-row on">(0) buffer0000: ' + S.clipboard.length + ' bytes: "' + esc(S.clipboard.split('\n')[0].slice(0, 40)) + '"</div></div>';
+    }
     var html = '<div class="picker" role="listbox" aria-label="' + tx('セッション') + '">';
     html += '<div class="picker-head">' + tx('(choose-tree)  ↑↓ で選んで Enter') + '</div>';
     S.sessions.forEach(function (s, i) {

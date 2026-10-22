@@ -346,7 +346,7 @@ window.ADV.EN = {
   "境目を{0}へ{1}マスずらす": "move the border {0} by {1}",
   "変える": "Change",
   "外からは tmux new -s 名前。中からなら prefix → : で new -s 名前。": "Outside: tmux new -s NAME. Inside: prefix → : then new -s NAME.",
-  "大きさ・名前・入れ替え・ウィンドウを閉じる・スクロールも混ざる。": "Adds resize, rename, swap, closing windows and scrolling.",
+  "大きさ・名前・入れ替え・ウィンドウを閉じる・スクロール・デタッチも混ざる。": "Adds resize, rename, swap, closing windows, scrolling and detaching.",
   "大きさ変更": "Resize",
   "奥の間に辿り着いた。": "Course cleared.",
   "始め": "Go",
@@ -528,5 +528,7 @@ window.ADV.EN = {
   "Enter を押す（この行をコピーする）": "Press Enter (copy this line)",
   "] を押す（貼り付ける）": "Press ] (paste)",
   "デタッチと復帰": "Detach and attach",
-  "コピーと貼り付け": "Copy and paste"
+  "コピーと貼り付け": "Copy and paste",
+  "バッファ": "Buffers",
+  "(choose-buffer)  Enter で貼る": "(choose-buffer)  Enter pastes"
 };
