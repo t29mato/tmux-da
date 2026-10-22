@@ -120,14 +120,14 @@
     {
       id: 'normal', title: '中級', mode: '腕試し', limit: 14, rankMul: 1.25, ver: 2,
       plan: { cols: 4, rows: 2, cells: 8, lit: 1 },
-      desc: '大きさ・名前・入れ替え・ウィンドウを閉じる・スクロールも混ざる。1 問 1〜5 手。',
-      qs: ['focus', 'resize', 'swap', 'rename', 'close', 'kill_window', 'copy_top', 'split_tb', 'swap', 'select_window', 'zoom', 'new_window', 'focus', 'resize', 'kill_window', 'unzoom', 'close', 'split_lr', 'rename', 'focus']
+      desc: '大きさ・名前・入れ替え・ウィンドウを閉じる・スクロール・デタッチも混ざる。1 問 1〜5 手。',
+      qs: ['focus', 'resize', 'swap', 'rename', 'close', 'kill_window', 'copy_top', 'split_tb', 'swap', 'select_window', 'zoom', 'new_window', 'detach_attach', 'resize', 'kill_window', 'unzoom', 'close', 'split_lr', 'rename', 'focus']
     },
     {
       id: 'hard', title: '上級', mode: '真剣勝負', limit: 18, rankMul: 1.6, ver: 2,
       plan: { cols: 5, rows: 4, cells: 20, lit: 6 },
       desc: '1 問で 2〜8 手。考える前に手が動くか。',
-      qs: ['find_zoom', 'trident', 'two_akima', 'new_and_home', 'swap_zoom', 'split_lr', 'find_zoom', 'copy_top', 'two_akima', 'trident', 'kill_window', 'swap_zoom', 'new_and_home', 'focus', 'resize', 'find_zoom']
+      qs: ['find_zoom', 'trident', 'two_akima', 'new_and_home', 'swap_zoom', 'split_lr', 'yank_paste', 'copy_top', 'two_akima', 'trident', 'kill_window', 'swap_zoom', 'new_and_home', 'focus', 'resize', 'find_zoom']
     }
   ];
 

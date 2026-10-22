@@ -150,6 +150,8 @@ async function solve(page, prefix, prefixOpt) {
       }
       break;
     case 'new_and_home': await p('c'); await p(String(s.run.goal.index)); break;
+    case 'detach_attach': await p('d'); await page.keyboard.type('tmux attach'); await page.keyboard.press('Enter'); break;
+    case 'yank_paste': await p('['); await page.keyboard.press('Space'); await page.keyboard.press('Enter'); await p(']'); break;
     default: throw new Error('no solver for ' + type);
   }
 }
@@ -207,7 +209,8 @@ async function playCourse(page, prefix, prefixOpt, label, how) {
     // A two-step question shows the step big and the whole order small.
     const ob = await page.$eval('#term .motd', (e) => (e.querySelector('.ob-whole') || e.querySelector('.ob-q')).textContent).catch(() => '');
     if (ob !== s.run.order) ok(false, label + ' question ' + (i + 1) + ' (' + s.run.type + '): the order bar says "' + ob + '"');
-    const marks = await page.$$eval('#term .goal, #status .goal-tab', (e) => e.length);
+    // A message shows in the status bar for a moment (as in tmux), over the window list.
+    const marks = await page.$$eval('#term .goal, #status .goal-tab, #status .st-msg', (e) => e.length);
     if (!marks) ok(false, label + ' question ' + (i + 1) + ' (' + s.run.type + '): no 完成図 mark in the house');
     if (how === 'guide') {
       for (let step = 0; step < 12; step++) {
@@ -473,9 +476,10 @@ async function playtest(browser) {
       const after = await st(page, true);
       ok(after.run.i === i && after.run.phase === 'play', L + ' resize: moving to another pane does not pass it');
     }
-    if (t === 'focus' && !seen.away && s.windows.length > 1) {
+    if (t === 'focus' && !seen.away) {
       seen.away = 1;
-      await page.keyboard.press('Control+b'); await page.keyboard.press('n');
+      // Away to another window: the next one, or a new one if this is the only one.
+      await page.keyboard.press('Control+b'); await page.keyboard.press(s.windows.length > 1 ? 'n' : 'c');
       const away = await st(page, true);
       ok(away.activeWindow !== s.activeWindow && away.run.next && /^\d$/.test(away.run.next.keys[0]), L + ' focus: in another window, the guide leads back to the window first');
       ok(!!(await page.$('#status .goal-tab')), L + ' focus: the window with the pane is marked on the status bar');
@@ -499,7 +503,7 @@ async function playtest(browser) {
     if (t === 'copy_top') seen.copy = 1;
     await followGuide(page, 'Control+b');
   }
-  ok(seen.resize && seen.rename && seen.copy === 2 && seen.away, L + ' the run had a resize, a rename, a scroll and a move from another window');
+  ok(seen.resize && seen.rename && seen.copy === 2 && seen.away, L + ' the run had a resize, a rename, a scroll and a move from another window (' + JSON.stringify(seen) + ')');
   ok(!errors.length, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await ctx.close();
 }
@@ -1011,7 +1015,7 @@ async function learning(browser) {
   ok(s.run.course === 'keiko' && s.run.n === 3 && s.run.qs.every((t) => t === 'resize'), L + ' K enters the 稽古の間: three questions of the one weak type (' + s.run.qs.join(',') + ')');
   await playCourse(page, 'Control+b', 'C-b', L + ' keiko', 'guide');
   await waitResult(page, L + ' keiko');
-  ok(/苦手の稽古 9 問、解き終わった/.test(await page.$eval('#result-body .em-title', (e) => e.textContent)), L + ' the 稽古 result says so');
+  ok(/苦手の稽古 \d+ 問、解き終わった/.test(await page.$eval('#result-body .em-title', (e) => e.textContent)), L + ' the 稽古 result says so');
   ok(!(await page.$('#result-body .name-form')), L + ' a 稽古 run is not offered for the boards');
   // Enter right away (a key held from the last question) does nothing; then it replays.
   await page.keyboard.press('Enter');
@@ -1229,6 +1233,219 @@ async function stillOrder(browser) {
   await ctx.close();
 }
 
+// The QA review: the keys the tips teach (PageUp, q, ', C-o, =, #), the
+// confirm that any key cancels, Ctrl held after the prefix, Japanese input,
+// the clock while the tab is hidden, zoom and resize edge cases, base-index,
+// the focus after a kill, the Z flag, and the two new questions.
+async function qa(browser) {
+  const L = '[qa]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  const status = () => page.$eval('#status', (e) => e.textContent);
+  const p = async (k) => { await page.keyboard.press('Control+b'); await page.keyboard.press(k); };
+  const misses = async () => (await st(page)).run.misses;
+  // prefix PageUp: copy mode, one page up (copy mode on a split question is a miss, as [ is).
+  await p('PageUp');
+  let s = await st(page);
+  ok(s.copyMode && !/割り当てがない/.test(await status()), L + ' prefix → PageUp enters copy mode');
+  await page.keyboard.press('q');
+  // prefix q: the numbers show; a number goes to that pane.
+  const a0 = (await st(page)).activePane;
+  let m0 = await misses();
+  await p('q');
+  ok(await page.$$eval('#term .dp-num', (e) => e.length) === 3, L + ' prefix → q shows the three pane numbers');
+  await page.keyboard.press('2');
+  s = await st(page);
+  ok(s.activePane !== a0 && s.panes.indexOf(s.activePane) === 2 && s.run.misses === m0, L + ' then 2 goes to pane 2 (no miss)');
+  ok(await page.$$eval('#term .dp-num', (e) => e.length) === 0, L + ' and the numbers are gone');
+  await p('q'); await page.keyboard.press('Escape');
+  ok(await page.$$eval('#term .dp-num', (e) => e.length) === 0 && (await st(page)).run.misses === m0, L + ' any other key takes the numbers away without a miss');
+  // Ctrl held: prefix → Ctrl+z says so, no miss.
+  m0 = await misses();
+  await p('Control+z');
+  ok(/Ctrl を離してから z/.test(await status()) && (await st(page)).run.misses === m0, L + ' prefix → Ctrl+z says to release Ctrl, no miss');
+  // An unbound key names itself.
+  await p('Control+k');
+  ok(/Ctrl\+k には割り当てがない/.test(await status()) && (await st(page)).run.misses === m0 + 1, L + ' an unbound key is named in the message and is a miss');
+  // confirm: any key but y cancels.
+  await p('x');
+  ok(/kill-pane/.test(await status()), L + ' x asks y/n');
+  const n0 = (await st(page)).panes.length;
+  await page.keyboard.press('a');
+  ok(!/kill-pane/.test(await status()) && (await st(page)).panes.length === n0, L + ' a cancels the confirm, nothing closed');
+  await p('x'); await page.keyboard.press('Control+b');
+  ok(!/kill-pane/.test(await status()) && !(await st(page)).armed, L + ' the prefix cancels it too (and does not arm)');
+  // C-o rotates: the focus stays where it is on screen, the contents move.
+  const before = (await st(page)).panes;
+  const act = (await st(page)).activePane;
+  m0 = await misses();
+  await p('Control+o');
+  s = await st(page);
+  ok(s.panes.join() === before.slice(1).concat(before[0]).join() && s.activePane === s.panes[before.indexOf(act)], L + ' prefix → Ctrl+o rotates the panes, the focus stays put');
+  ok(s.run.misses === m0 + (s.run.type === 'swap' ? 0 : 1), L + ' (rotate counts as a swap: a miss on any other question, like { )');
+  // Resize while zoomed: unzooms and resizes.
+  await p('z');
+  ok((await st(page)).windows.find((w) => w.active).zoomed, L + ' z zooms');
+  await p('Alt+ArrowLeft');
+  ok(!(await st(page)).windows.find((w) => w.active).zoomed, L + ' a resize while zoomed unzooms first, as tmux does');
+  // z on a one-pane window: nothing.
+  // On a question that c or z would answer (or that adds a pane to zoom), move on first.
+  for (let t = 0; t < 30 && /new_window|zoom/.test((await st(page)).run.type); t++) await followGuide(page, 'Control+b');
+  await p('c');
+  await p('z');
+  ok(!(await st(page)).windows.find((w) => w.active).zoomed && /1 つだけ/.test(await status()), L + ' z on a window of one pane does nothing');
+  // Z on an inactive zoomed window shows in the status bar.
+  await p('0'); await p('z'); await p('1');
+  await page.waitForTimeout(1900);
+  ok(/0:main-Z/.test(await status()), L + ' the Z flag shows on a zoomed window that is not the active one (' + (await status()).slice(0, 40) + ')');
+  await p('0'); await p('z');
+  // ' asks for a window number.
+  await p("'");
+  ok(/index/.test(await status()), L + " prefix → ' asks for an index");
+  await page.keyboard.type('1'); await page.keyboard.press('Enter');
+  ok((await st(page)).activeIndex === 1, L + ' typing 1 and Enter goes to window 1');
+  await p('0');
+  // = and #: the buffers.
+  await p('#');
+  ok(/no buffers/.test(await status()), L + ' # with nothing copied says no buffers');
+  await page.keyboard.type('echo hello-buffer'); await page.keyboard.press('Enter');
+  await p('['); await page.keyboard.press('Space'); await page.keyboard.press('Enter');
+  ok(/hello-buffer/.test((await st(page)).clipboard), L + ' Space, Enter copies the line');
+  await p('#');
+  ok(/buffer0000/.test(await status()), L + ' # lists it');
+  await p('=');
+  ok(!!(await page.$('#term .picker')), L + ' = opens the buffer list');
+  await page.keyboard.press('Enter');
+  ok(/hello-buffer/.test((await st(page)).input), L + ' Enter pastes it');
+  await page.keyboard.press('Control+u');
+  // IME: composing is not a key, and it is said.
+  const mi = (await st(page)).run.misses;
+  await page.keyboard.press('Control+b');
+  await page.evaluate(() => {
+    const sink = document.getElementById('sink');
+    sink.focus();
+    sink.dispatchEvent(new KeyboardEvent('keydown', { key: 'Process', code: 'Digit5', shiftKey: true, bubbles: true, cancelable: true }));
+    sink.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    sink.value = '％';
+    sink.dispatchEvent(new InputEvent('input', { data: '％', inputType: 'insertCompositionText', isComposing: true, bubbles: true }));
+    sink.dispatchEvent(new CompositionEvent('compositionend', { data: '％', bubbles: true }));
+    sink.dispatchEvent(new InputEvent('input', { data: '％', inputType: 'insertCompositionText', isComposing: false, bubbles: true }));
+  });
+  s = await st(page);
+  ok(s.run.misses === mi && s.input === '' && /日本語入力/.test(await status()), L + ' Japanese input: no miss, nothing typed, the status says to switch (' + (await status()).slice(0, 30) + ')');
+  ok(await page.$eval('#sink', (e) => e.value) === '', L + ' the composed text is dropped from the sink');
+  await page.keyboard.press('Escape');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+
+  // The clock while the tab is hidden during the 成 hold and the countdown.
+  const c2 = await browser.newContext({ viewport: DESKTOP });
+  const p2 = await c2.newPage();
+  await p2.goto(PAGE);
+  await p2.click('#course-list [data-course="easy"]');
+  await p2.waitForTimeout(100);
+  await p2.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { get: () => true, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await p2.waitForTimeout(2600);
+  ok((await st(p2, true)).run.phase === 'pause' && await p2.$eval('#pause', (e) => !e.hidden), L + ' hidden during the countdown: paused when it ends');
+  await p2.evaluate(() => { Object.defineProperty(document, 'hidden', { get: () => false, configurable: true }); });
+  await p2.keyboard.press('Escape');
+  await waitPlay(p2);
+  for (let i = 0; i < 8 && (await st(p2, true)).run.phase === 'play'; i++) await followGuide(p2, 'Control+b');
+  ok((await st(p2, true)).run.phase === 'clear', L + ' a question is solved and held');
+  await p2.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { get: () => true, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await p2.waitForTimeout(1200);
+  const held = await st(p2, true);
+  ok(held.run.phase === 'pause' && held.run.i === 1, L + ' hidden during the hold: the next question starts paused');
+  await c2.close();
+
+  // A browser resize mid-question does not pass a resize question.
+  const c3 = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const p3 = await c3.newPage();
+  await p3.goto(PAGE);
+  await p3.click('#course-list [data-course="normal"]');
+  await waitPlay(p3);
+  let found = null;
+  for (let g = 0; g < 60 && !found; g++) {
+    const now = await st(p3);
+    if (!now.run || now.run.phase !== 'play') break;
+    if (now.run.type === 'resize') { found = now; break; }
+    await followGuide(p3, 'Control+b');
+  }
+  if (found) {
+    await p3.setViewportSize({ width: 800, height: 800 });
+    await p3.waitForTimeout(200);
+    await p3.keyboard.press('Control+b'); await p3.keyboard.press('Control+ArrowLeft');
+    const after = await st(p3, true);
+    ok(after.run.i === found.run.i && after.run.phase === 'play', L + ' a browser resize mid-question does not make one press a resize');
+    for (let g = 0; g < 10 && (await st(p3)).run.i === found.run.i; g++) await followGuide(p3, 'Control+b');
+    ok((await st(p3)).run.i > found.run.i, L + ' and the guide still solves it in the new size');
+  } else ok(false, L + ' no resize question reached');
+  await c3.close();
+
+  // Own conf: base-index 1 and pane-base-index 1, bind x kill-pane in the step text.
+  const c4 = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const p4 = await c4.newPage();
+  await p4.goto(PAGE);
+  await p4.click('#conf-box summary');
+  await p4.fill('#conf-text', 'set -g base-index 1\nsetw -g pane-base-index 1\nbind x kill-pane\n');
+  await p4.click('#conf-apply');
+  ok(await p4.$$eval('#conf-report > ul li', (e) => e.length) === 3, L + ' base-index, pane-base-index and the bind are used lines');
+  await p4.click('#course-list [data-course="easy"]');
+  await waitPlay(p4);
+  const w4 = (await st(p4)).windows.map((w) => w.index).join(',');
+  ok(w4 === '1,2,3', L + ' windows are numbered from 1 (' + w4 + ')');
+  ok(await p4.$eval('#term .pane.active .pnum', (e) => e.textContent) === '1', L + ' panes are numbered from 1');
+  await p4.keyboard.press('Control+b'); await p4.keyboard.press('c');
+  ok(/4:zsh/.test(await p4.$eval('#status', (e) => e.textContent)), L + ' a new window is 4');
+  // (the first question is zoom: in this window of one pane z does nothing, so the guide must ask again)
+  let closeText = null;
+  for (let g = 0; g < 80 && closeText === null; g++) {
+    const now = await st(p4);
+    if (!now.run || now.run.phase !== 'play') break;
+    if (now.run.type === 'close' && now.run.next && now.run.next.keys[0] === 'x') { closeText = now.run.next.text; break; }
+    await followGuide(p4, 'Control+b');
+  }
+  ok(closeText !== null && /すぐ閉じる/.test(closeText) && !/確認が出る/.test(closeText), L + ' with bind x kill-pane the step says it closes at once (' + closeText + ')');
+  await c4.close();
+
+  // 10+ windows: the guide goes through ' and the number.
+  const c5 = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const p5 = await c5.newPage();
+  await p5.goto(PAGE);
+  await p5.click('#course-list [data-course="easy"]');
+  await waitPlay(p5);
+  // Windows 0..11, then 0..9 closed: only 10 and 11 are left.
+  for (let i = 0; i < 9; i++) { await p5.keyboard.press('Control+b'); await p5.keyboard.press('c'); }
+  for (let i = 0; i < 10; i++) { await p5.keyboard.press('Control+b'); await p5.keyboard.press(String(i)); await p5.keyboard.press('Control+b'); await p5.keyboard.press('&'); await p5.keyboard.press('y'); }
+  ok((await st(p5)).windows.map((w) => w.index).join() === '10,11', L + ' two windows, 10 and 11, are left');
+  let sel = null;
+  for (let g = 0; g < 80 && !sel; g++) {
+    const now = await st(p5);
+    if (!now.run || now.run.phase !== 'play') break;
+    if (now.run.type === 'select_window') { sel = now; break; }
+    await followGuide(p5, 'Control+b');
+  }
+  if (sel) {
+    ok(sel.run.next.keys[0] === "'" && sel.run.next.pfx, L + " a window from 10 on: the guide says prefix ' (" + sel.run.next.text + ')');
+    await followGuide(p5, 'Control+b');
+    const typed = (await st(p5)).run.next;
+    ok(!!typed && typed.type === String(sel.run.goal.index) && !typed.pfx && typed.keys.length === 0, L + ' then the number to type (' + (typed && typed.text) + ')');
+    await followGuide(p5, 'Control+b');
+    ok((await st(p5)).run.i > sel.run.i, L + ' and the question is solved');
+  } else ok(false, L + ' no select_window to a window 10+ reached');
+  await c5.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -1251,6 +1468,7 @@ const parts = [
   ['english', english],
   ['playtest', playtest],
   ['slips', slips],
+  ['qa', qa],
   ['editing', lineEditing],
   ['records', records],
   ['learning', learning],

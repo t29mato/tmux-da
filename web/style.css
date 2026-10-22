@@ -886,3 +886,6 @@ body[data-armed="1"] .yashiki .term { box-shadow: none; }
 .em-slow li { display: flex; justify-content: space-between; gap: 12px; }
 .em-slow b { font-family: var(--mono); font-weight: 400; white-space: nowrap; }
 .em-slow small { margin-left: 8px; color: var(--shu); font-family: var(--sans); font-size: 12px; }
+/* display-panes (prefix → q): the pane numbers, big, for a second */
+#term > .dp-num { position: absolute; z-index: 9; display: flex; align-items: center; justify-content: center; pointer-events: none; font-family: var(--mono); font-size: 56px; font-weight: 700; color: #fff; text-shadow: 0 0 8px #000, 0 0 2px #000; }
+#term > .dp-num.active { color: var(--andon-2); }

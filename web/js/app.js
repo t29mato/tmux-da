@@ -349,7 +349,7 @@
   // ---- sessions ------------------------------------------------------------
 
   function makeSession(name) {
-    var s = T.createSession({ name: name, baseIndex: 0, paneBaseIndex: 0 });
+    var s = T.createSession({ name: name, baseIndex: S.conf ? S.conf.baseIndex : 0, paneBaseIndex: S.conf ? S.conf.paneBaseIndex : 0 });
     var w = T.createWindow(s, name === 'dojo' ? 'main' : 'zsh');
     s.active = w.id;
     S.sessions.push(s);
@@ -603,9 +603,10 @@
     }
     if (k.meta) return false;
 
+    // confirm-before: y runs it; any other key cancels, as in tmux.
     if (S.confirm) {
-      if (k.key === 'y' || k.key === 'Y') { var yes = S.confirm.yes; S.confirm = null; yes(); }
-      else if (k.key === 'n' || k.key === 'N' || k.key === 'Escape' || k.key === 'q' || (k.ctrl && k.key === 'c')) S.confirm = null;
+      if ((k.key === 'y' || k.key === 'Y') && !k.ctrl && !k.alt) { var yes = S.confirm.yes; S.confirm = null; yes(); }
+      else S.confirm = null;
       return true;
     }
     if (S.prompt) {
@@ -615,6 +616,18 @@
       return true;
     }
     if (S.picker) return pickerKey(k);
+
+    // display-panes (prefix q): a number while the numbers show goes to that
+    // pane; any other key takes the numbers away and does its own work.
+    if (S.panesShown) {
+      hidePaneNumbers();
+      if (/^[0-9]$/.test(k.key) && !k.ctrl && !k.alt) {
+        var dps = T.panesOf(win), dp = dps[Number(k.key) - S.session.paneBaseIndex];
+        if (dp) T.selectPane(win, dp.id);
+        S.lastAction = 'focus';
+        return true;
+      }
+    }
 
     if (isPrefix(k)) {
       S.repeatUntil = 0;
@@ -699,7 +712,7 @@
       resize(win, pane, { dir: a.resize, n: a.n });
       S.lastAction = 'resize';
     } else {
-      prefixedKey({ key: a.key, code: /^[0-9]$/.test(a.key) ? 'Digit' + a.key : undefined, ctrl: false, alt: false, shift: false, meta: false }, win, pane);
+      prefixedKey({ key: a.key, code: /^[0-9]$/.test(a.key) ? 'Digit' + a.key : undefined, ctrl: !!a.ctrl, alt: false, shift: false, meta: false }, win, pane);
       // kill-pane / kill-window with no confirm-before: at once.
       if (a.now && S.confirm) { var yes = S.confirm.yes; S.confirm = null; yes(); }
     }
@@ -717,10 +730,10 @@
   function resize(win, pane, r) {
     var axis = (r.dir === 'L' || r.dir === 'R') ? 'lr' : 'tb';
     var n = (r.dir === 'L' || r.dir === 'U') ? -r.n : r.n;
+    // resize-pane unzooms the window first, as tmux does.
     if (!T.resizePane(win, pane.id, axis, n, S.cols, S.rows)) {
       var other = axis === 'lr' ? '↑ / ↓' : '← / →';
-      message(win.zoomed ? '全画面中は大きさを変えられない（z で戻す）'
-        : T.panesOf(win).length < 2 ? 'ペインが 1 つだけなので動かせない。先に分割しよう'
+      message(T.panesOf(win).length < 2 ? 'ペインが 1 つだけなので動かせない。先に分割しよう'
         : tx('この向きにはもう動かせない。反対向きか、{0} を試そう', other));
     }
   }
@@ -734,6 +747,13 @@
     if (k.alt && !k.ctrl && /^Digit[1-5]$/.test(k.code || '')) {
       T.applyLayout(win, T.LAYOUTS[Number(k.code.slice(5)) - 1]);
       S.lastAction = 'layout';
+      return true;
+    }
+    if (k.ctrl && !k.alt && key.toLowerCase() === 'o') { T.rotateWindow(win); S.lastAction = 'swap'; return true; }
+    // Ctrl still held from the prefix: Ctrl+z is not z. Said, not counted.
+    if (k.ctrl && !k.alt && DEFAULT_KEYS.indexOf(key.length === 1 ? key.toLowerCase() : key) >= 0) {
+      message(tx('Ctrl を離してから {0} を押す', key.length === 1 ? key.toLowerCase() : key));
+      S.lastAction = 'brief';
       return true;
     }
     if (k.ctrl || k.alt) { unbound(k); return true; }
@@ -754,7 +774,34 @@
 
     if (key === '%') { nameRoom(T.splitPane(win, pane.id, 'lr', null, false)); S.lastAction = 'split_lr'; return true; }
     if (key === '"') { nameRoom(T.splitPane(win, pane.id, 'tb', null, false)); S.lastAction = 'split_tb'; return true; }
-    if (key === 'z') { win.zoomed = !win.zoomed; S.lastAction = 'zoom'; return true; }
+    if (key === 'z') {
+      // resize-pane -Z on a window of one pane does nothing in tmux.
+      if (T.panesOf(win).length < 2) message('ペインが 1 つだけなので全画面にはならない');
+      else win.zoomed = !win.zoomed;
+      S.lastAction = 'zoom';
+      return true;
+    }
+    if (key === 'q') { showPaneNumbers(); S.lastAction = 'brief'; return true; }
+    if (key === "'") {
+      // command-prompt -p index "select-window -t ':%%'"
+      S.lastAction = 'select_window';
+      S.prompt = { label: INDEX_PROMPT, value: '', done: function (v) {
+        var w = /^\d+$/.test(v.trim()) ? T.windowByIndex(S.session, Number(v.trim())) : null;
+        if (w) T.selectWindow(S.session, w.id);
+        else if (v.trim()) message(tx('ウィンドウ {0} はない', v.trim()));
+        S.lastAction = 'select_window';
+      } };
+      return true;
+    }
+    if (key === 'PageUp') { enterCopy(pane); copyModeKey({ key: 'PageUp' }, pane); S.lastAction = 'copy'; return true; }
+    if (key === '=' || key === '#') {
+      // choose-buffer / list-buffers: the game has one buffer.
+      S.lastAction = 'brief';
+      if (!S.clipboard) { if (key === '#') message('no buffers'); return true; }
+      if (key === '#') message('buffer0000: ' + S.clipboard.length + ' bytes: "' + S.clipboard.split('\n')[0].slice(0, 30) + '"');
+      else S.picker = { kind: 'buffer', idx: 0 };
+      return true;
+    }
     if (key === 'x') {
       var idx = T.paneIndex(S.session, win, pane);
       S.lastAction = 'close';
@@ -843,15 +890,27 @@
     return true;
   }
 
-  // A prefixed key tmux has nothing for: the miss names the key.
+  // The default prefix keys the game has: a Ctrl+key of one of them is a
+  // slip of the finger, not a miss.
+  var DEFAULT_KEYS = '%"zxc&np,[]d$sw(){} :l;oi?q\'=#0123456789'.split('').concat(['PageUp']);
+
+  var INDEX_PROMPT = 'index';
+
   function unbound(k) {
     S.lastAction = 'unbound';
-    message(tx('{0} には割り当てがない', keyLabel(k)));
+    message(tx('{0} には割り当てがない', CF.keyLabel({ key: k.key, ctrl: !!k.ctrl, alt: !!k.alt, shift: !!k.shift })));
   }
 
-  function keyLabel(k) {
-    var key = k.key === ' ' ? 'Space' : k.key === 'Escape' ? 'Esc' : k.key;
-    return (k.ctrl ? 'Ctrl+' : '') + (k.alt ? 'Alt+' : '') + (k.shift && key.length > 1 ? 'Shift+' : '') + key;
+  // display-panes: the numbers show for display-panes-time (1 s).
+  function showPaneNumbers() {
+    S.panesShown = Date.now() + 1000;
+    clearTimeout(S.dpTimer);
+    S.dpTimer = setTimeout(function () { if (S.panesShown) { S.panesShown = null; if (S.screen === 'game') renderTerm(); } }, 1000);
+  }
+
+  function hidePaneNumbers() {
+    S.panesShown = null;
+    clearTimeout(S.dpTimer);
   }
 
   function withUnzoom(win) {
@@ -1036,7 +1095,7 @@
     var c = pane.cur == null ? pane.input.length : pane.cur;
     pane.input = pane.input.slice(0, c) + text + pane.input.slice(c);
     pane.cur = c + text.length;
-    pane.pasted = true;
+    if (text) pane.pasted = true;
   }
 
   // ---- the session picker (choose-tree) ---------
@@ -1046,8 +1105,14 @@
   }
 
   function pickerKey(k) {
-    var n = S.sessions.length;
     var key = k.key;
+    // choose-buffer: Enter pastes the one buffer.
+    if (S.picker.kind === 'buffer') {
+      if (key === 'Enter') { S.picker = null; paste(T.activePane(T.activeWindow(S.session))); }
+      else if (key === 'Escape' || key === 'q' || (k.ctrl && key === 'c')) S.picker = null;
+      return true;
+    }
+    var n = S.sessions.length;
     if (key === 'ArrowUp' || key === 'k') S.picker.idx = (S.picker.idx - 1 + n) % n;
     else if (key === 'ArrowDown' || key === 'j') S.picker.idx = (S.picker.idx + 1) % n;
     else if (key === 'Enter') { switchSession(S.sessions[S.picker.idx]); S.picker = null; S.lastAction = 'choose'; }
@@ -1085,7 +1150,9 @@
       if (e.key === ' ' || e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); return; }
     }
     // A soft keyboard's keydown carries no key; its text comes as input.
-    if (e.key === 'Unidentified' || e.key === 'Process' || e.isComposing) return;
+    if (e.key === 'Unidentified') return;
+    // Japanese input is on: the keys go to the IME, not the game. Said, not a miss.
+    if (e.key === 'Process' || e.isComposing) { imeNote(); return; }
     var k = { key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey };
     // A key typed into the focused sink is handled here, never again as input.
     if (t && t.id === 'sink' && !e.metaKey && (e.key.length === 1 || e.key === 'Enter')) e.preventDefault();
@@ -1122,9 +1189,20 @@
     }
   }
 
+  function imeNote() {
+    if (S.screen !== 'game') return;
+    message('日本語入力がオンになっている。英数に切り替える');
+    renderStatus();
+  }
+
   // Soft keyboards may not produce usable keydown events; take the text.
   function onSinkInput(e) {
     var sink = e.target;
+    // Text being composed by an IME is not keys; it is dropped when it ends.
+    if (e.isComposing || S.composing || /Composition/.test(e.inputType || '')) {
+      if (!e.isComposing && !S.composing) sink.value = '';
+      return;
+    }
     var data = sink.value;
     sink.value = '';
     if (!data) return;
@@ -1196,13 +1274,14 @@
     var dir = tx(DIR_WORDS[best.d]);
     var where = best.dist < 0 && p ? tx('{0}の{1} へ', dir, paneLabel(p.pane)) : tx('{0}へ', dir);
     var m = mv([ARROWS[best.d]], tx('{0} を押す（{1}）', ARROWS[best.d], where));
-    m.alt = altMoves(win, id);
+    m.alt = altMoves(win, id, best.dist >= 0);
     return m;
   }
 
   // Other ways to the pane in one step: o (the next pane in order) and ;
   // (the pane you were in last). Shown beside the 手順, never required.
-  function altMoves(win, id) {
+  // `far`: more than one arrow away, where q and the number get there in one go.
+  function altMoves(win, id, far) {
     var out = [];
     if (win.last === id && T.findPane(S.session, id)) {
       out.push(mv([';'], '直前のペインへ戻る'));
@@ -1211,6 +1290,8 @@
     var at = ps.findIndex(function (q) { return q.id === win.active; });
     if (ps.length > 2 && ps[(at + 1) % ps.length].id === id) out.push(mv(['o'], '次のペインへ'));
     else if (ps.length === 2) out.push(mv(['o'], 'もう一つのペインへ'));
+    var h = far && T.findPane(S.session, id);
+    if (h && h.win === win) { var qi = T.paneIndex(S.session, win, h.pane); out.push(mv(['q', String(qi)], tx('q で番号を出し、{0} を押す', qi))); }
     return out;
   }
 
@@ -1220,7 +1301,8 @@
   var LABEL_SIG = {
     '%': 'k:%', '"': 'k:"', '←': 'k:ArrowLeft', '→': 'k:ArrowRight', '↑': 'k:ArrowUp', '↓': 'k:ArrowDown',
     z: 'k:z', x: 'k:x', c: 'k:c', ',': 'k:,', n: 'k:n', p: 'k:p', l: 'k:l', '[': 'k:[', ']': 'k:]',
-    '{': 'k:{', '}': 'k:}', '&': 'k:&', o: 'k:o', ';': 'k:;', ':': 'k::', $: 'k:$', s: 'k:s', d: 'k:d', Space: 'k: '
+    '{': 'k:{', '}': 'k:}', '&': 'k:&', o: 'k:o', ';': 'k:;', ':': 'k::', $: 'k:$', s: 'k:s', d: 'k:d', Space: 'k: ',
+    q: 'k:q', PageUp: 'k:PageUp', "'": "k:'"
   };
   ['L', 'R', 'U', 'D'].forEach(function (d) { LABEL_SIG['Ctrl+' + ARROWS[d]] = 'r:' + d + ':1'; LABEL_SIG['Option+' + ARROWS[d]] = 'r:' + d + ':5'; });
   var ARROW_KEY = { '←': 'ArrowLeft', '→': 'ArrowRight', '↑': 'ArrowUp', '↓': 'ArrowDown' };
@@ -1247,7 +1329,7 @@
       if (sigOf(b.act) !== want) return;
       if (!found || (b.table === 'root' && found.table !== 'root') || (b.table === found.table)) found = b;
     });
-    if (found) return { label: found.key.label, pfx: found.table === 'prefix', n: found.act.n, root: found.table === 'root' };
+    if (found) return { label: found.key.label, pfx: found.table === 'prefix', n: found.act.n, root: found.table === 'root', now: !!found.act.now };
     if (!CF.overridden(S.conf, labelEvent(label))) return { label: label, pfx: true, same: true };
     return { none: true, cmd: CMD_FOR[want] };
   }
@@ -1262,13 +1344,16 @@
     }
     var text = m.text.replace(m.keys[0], o.label).replace(/（Shift\+\d）|（ダブルクォート）| \(Shift\+\d\)| \(double quote\)/g, '');
     if (o.n) text = text.replace(/（1 回[^）]*）| \(\d+ cells? per press[^)]*\)/, tx('（1 回 {0} マス{1}）', o.n, o.n < 5 ? tx('。続けて押す') : ''));
+    // kill-pane with no confirm-before: it closes at once.
+    if (o.now) text = text.replace(/（確認が出る）| \(it asks to confirm\)/, tx('（すぐ閉じる）'));
     if (o.root) text += tx('（prefix なし）');
     return { pfx: o.pfx, keys: [o.label], text: text };
   }
 
   // The move the 手順 shows now, in the player's keys.
   function guideMove(b) {
-    var m = openFirst(b) || b.q.next();
+    var m = b.q.next();
+    m = openFirst(b, m) || m;
     // A y/n question this order does not want: say no first.
     if (S.confirm && (!m || (m.keys[0] !== 'y' && m.keys[0] !== 'n'))) m = mv(['n'], 'n で取り消す', true);
     if (!m || !S.conf) return m;
@@ -1282,11 +1367,19 @@
 
   // Something left open by a slip comes first: tmux detached, a list, a prompt
   // this question does not ask for.
-  function openFirst(b) {
-    if (S.detached) { var m = mv(['Enter'], 'tmux attach と打って Enter（tmux に戻る）', true); m.type = 'tmux attach'; return m; }
+  // `m` is the question's own move: one marked `prompt` works inside the
+  // open prompt (a name, a window number) and is kept.
+  function openFirst(b, m) {
+    if (S.detached) return m && m.type ? m : attachMove();
     if (S.picker) return mv(['Esc'], 'Esc で一覧を閉じる', true);
-    if (S.prompt && !(b.type === 'rename' && S.prompt.label === '(rename-window)')) return mv(['Esc'], 'Esc で入力欄を閉じる', true);
+    if (S.prompt && !(m && m.prompt)) return mv(['Esc'], 'Esc で入力欄を閉じる', true);
     return null;
+  }
+
+  function attachMove() {
+    var m = mv(['Enter'], 'tmux attach と打って Enter（tmux に戻る）', true);
+    m.type = 'tmux attach';
+    return m;
   }
 
   // What a question is about may be gone (a slip closed it), or a shape may
@@ -1295,6 +1388,8 @@
     var t = b.type;
     if (t === 'resize') return !paneExists(S.q0.id);
     if (t === 'trident') return tridentState() === 'other';
+    // z does nothing on a window of one pane: the question needs a second.
+    if (t === 'zoom') return T.panesOf(T.activeWindow(S.session)).length < 2;
     if (t === 'select_window') return !T.windowById(S.session, S.q0);
     if (t === 'new_and_home') return !T.windowById(S.session, S.q0.home);
     if (t === 'rename') return !T.windowById(S.session, S.q0.win);
@@ -1313,11 +1408,19 @@
     return moveTo(id) || mv(['x'], 'x を押す（確認が出る）');
   }
 
-  // To window `id`: by its number, as the status bar shows it.
+  // To window `id`: by its number, as the status bar shows it. From 10 on
+  // there is no key for it: prefix ' asks for the number.
   function windowMove(id, verb) {
     var w = T.windowById(S.session, id);
     if (!w) return null;
-    return mv([String(w.index)], tx(verb ? '{0} を押す（{1} に戻る）' : '{0} を押す（{1} へ）', w.index, winLabel(w)));
+    if (w.index < 10) return mv([String(w.index)], tx(verb ? '{0} を押す（{1} に戻る）' : '{0} を押す（{1} へ）', w.index, winLabel(w)));
+    if (S.prompt && S.prompt.label === INDEX_PROMPT) {
+      var m = mv([], tx(S.prompt.value ? 'Ctrl+u で消して {0} と打って Enter' : '{0} と打って Enter（{1} へ）', w.index, winLabel(w)), true);
+      m.prompt = true;
+      m.type = String(w.index);
+      return m;
+    }
+    return mv(["'"], tx("' を押す（番号の入力欄が出る）。{0} と打って Enter で {1} へ", w.index, winLabel(w)));
   }
 
   // The resize key that can move something: sideways if the pane has a
@@ -1336,8 +1439,8 @@
       var copy = JSON.parse(JSON.stringify(win));
       var axis = d === 'L' || d === 'R' ? 'lr' : 'tb';
       for (var n = 0; n < 6; n++) T.resizePane(copy, win.active, axis, d === 'L' || d === 'U' ? -step : step, S.cols, S.rows);
-      var cr = T.rectOf(copy, win.active, S.cols, S.rows);
-      if (cr && r && (Math.abs(cr.w - S.q0.w) >= 5 || Math.abs(cr.h - S.q0.h) >= 3)) { pick = i; break; }
+      var cr = T.rectOf(copy, win.active, S.cols, S.rows), r0 = baseRect();
+      if (cr && r0 && (Math.abs(cr.w - r0.w) >= 5 || Math.abs(cr.h - r0.h) >= 3)) { pick = i; break; }
     }
     var lb = LV.KEYS.resize[pick];
     return mv([lb], tx(/^Option/.test(lb) ? '{0} を押す（1 回で 5 マス）' : '{0} を押す（1 回 1 マス。続けて 5 回）', lb));
@@ -1347,8 +1450,21 @@
   function resizedBy() {
     var w = T.activeWindow(S.session);
     var rr = S.q0 && T.rectOf(w, S.q0.id, S.cols, S.rows);
-    if (!rr) return 0;
-    return Math.max(Math.abs(rr.w - S.q0.w), Math.abs(rr.h - S.q0.h));
+    var r0 = baseRect();
+    if (!rr || !r0) return 0;
+    return Math.max(Math.abs(rr.w - r0.w), Math.abs(rr.h - r0.h));
+  }
+
+  // The shape of the window as a question began, kept as a tree so that a
+  // browser resized mid-question gives the same baseline in the new cells.
+  function cloneTree(node) {
+    if (node.type === 'pane') return { type: 'pane', pane: node.pane };
+    return { type: 'split', dir: node.dir, ratio: node.ratio, a: cloneTree(node.a), b: cloneTree(node.b) };
+  }
+
+  function baseRect() {
+    if (!S.q0 || !S.q0.root) return null;
+    return T.rectOf({ root: S.q0.root, zoomed: false }, S.q0.id, S.cols, S.rows);
   }
 
   function swapMove() {
@@ -1384,14 +1500,14 @@
     split_lr: {
       steps: 1, text: '左右に分割する（split）', cmd: 'split-window -h', allow: ['split_lr'], show: ['split_lr'],
       goal: function () { return [{ pane: activeId(), mark: 'split-v', tag: 'ここを左右に' }]; },
-      setup: function () { S.q0 = splitCount(T.activeWindow(S.session), 'lr'); },
+      setup: function () { needUnzoom(); S.q0 = splitCount(T.activeWindow(S.session), 'lr'); },
       check: function () { return splitCount(T.activeWindow(S.session), 'lr') > S.q0; },
       next: function () { return mv(['%'], '% を押す（Shift+5）。右に新しいペインが開く'); }
     },
     split_tb: {
       steps: 1, text: '上下に分割する（split）', cmd: 'split-window -v', allow: ['split_tb'], show: ['split_tb'],
       goal: function () { return [{ pane: activeId(), mark: 'split-h', tag: 'ここを上下に' }]; },
-      setup: function () { S.q0 = splitCount(T.activeWindow(S.session), 'tb'); },
+      setup: function () { needUnzoom(); S.q0 = splitCount(T.activeWindow(S.session), 'tb'); },
       check: function () { return splitCount(T.activeWindow(S.session), 'tb') > S.q0; },
       next: function () { return mv(['"'], '" を押す（ダブルクォート）。下に新しいペインが開く'); }
     },
@@ -1459,14 +1575,13 @@
       setup: function () {
         needUnzoom(); needPanes(2);
         var win = T.activeWindow(S.session);
-        var rr = T.rectOf(win, win.active, S.cols, S.rows);
-        S.q0 = { id: win.active, w: rr ? rr.w : 0, h: rr ? rr.h : 0 };
+        S.q0 = { id: win.active, root: cloneTree(win.root) };
       },
       // Only a resize counts: moving to a pane of another size is not one.
       check: function () {
         var w = T.activeWindow(S.session);
-        var rr = T.rectOf(w, S.q0.id, S.cols, S.rows);
-        return S.lastAction === 'resize' && !!rr && !w.zoomed && (Math.abs(rr.w - S.q0.w) >= 5 || Math.abs(rr.h - S.q0.h) >= 3);
+        var rr = T.rectOf(w, S.q0.id, S.cols, S.rows), r0 = baseRect();
+        return S.lastAction === 'resize' && !!rr && !!r0 && !w.zoomed && (Math.abs(rr.w - r0.w) >= 5 || Math.abs(rr.h - r0.h) >= 3);
       },
       // Back to the pane the question is about first (another pane, another window).
       next: function () { return moveTo(S.q0.id) || resizeMove(); }
@@ -1495,7 +1610,11 @@
       },
       check: function () { var w = T.windowById(S.session, S.q0.win); return !!w && w.name === S.q0.name; },
       next: function () {
-        if (S.prompt) return mv([], tx('Ctrl+u（か Backspace）で今の名前「{0}」を消し、{1} と打って Enter', S.prompt.value, S.q0.name), true);
+        if (S.prompt && S.prompt.label === '(rename-window)') {
+          var pm = mv([], tx('Ctrl+u（か Backspace）で今の名前「{0}」を消し、{1} と打って Enter', S.prompt.value, S.q0.name), true);
+          pm.prompt = true;
+          return pm;
+        }
         var w = T.windowById(S.session, S.q0.win);
         if (w && w.name !== S.q0.from && w.name !== S.q0.name) return mv([','], tx('名前が「{0}」になった。もう一度 , を押して、{1} に直す', w.name, S.q0.name));
         return mv([','], ', を押す（カンマ）。名前の入力欄が出る');
@@ -1568,6 +1687,7 @@
         return [{ pane: activeId(), mark: 'close', tag: '閉じてやり直す' }];
       },
       setup: function () {
+        needUnzoom();
         var win = T.activeWindow(S.session);
         S.q0 = { pane: win.active, parent: T.parentOf(win.root, win.active).parent };
       },
@@ -1643,6 +1763,52 @@
         return isFirst(S.target) ? [2, 2, '全画面にする'] : [1, 2, tx('{0} を左上まで動かす', paneLabel(p.pane))];
       },
       next: function () { return isFirst(S.target) ? (moveTo(S.target) || mv(['z'], 'z を押す（全画面に）')) : swapMove(); }
+    },
+    detach_attach: {
+      text: 'デタッチして、tmux attach で戻る', cmd: 'detach-client → tmux attach', allow: ['detach'], show: ['detach'], steps: 2,
+      goal: function () { return [{ pane: activeId(), mark: 'go', tag: 'デタッチして戻る' }]; },
+      setup: function () {
+        // Already outside (a slip): the first half is done.
+        S.q1 = S.detached;
+        S.target = activeId();
+      },
+      check: function () {
+        if (S.detached) S.q1 = true;
+        return S.q1 && !S.detached;
+      },
+      step: function () { return S.detached || S.q1 ? [2, 2, 'tmux attach で戻る'] : [1, 2, 'デタッチする']; },
+      next: function () { return S.detached ? attachMove() : mv(['d'], 'd を押す（デタッチ）。tmux の外のシェルに戻る'); }
+    },
+    yank_paste: {
+      text: 'コピーモードで 1 行コピーして、貼り付ける', cmd: 'copy-mode → paste-buffer', allow: ['copy', 'yank_start', 'yank', 'paste'], show: ['copy', 'yank', 'paste'], steps: 4,
+      goal: function () { return [{ pane: S.q0.id, mark: 'go', tag: S.clipboard ? 'ここに貼り付ける' : '1 行コピーする' }]; },
+      setup: function () {
+        var pane = T.activePane(T.activeWindow(S.session));
+        pane.mode = null;
+        pane.pasted = false;
+        // A line to copy, printed last so the copy cursor starts on it.
+        pane.lines.push({ html: '<span class="sh-prompt">' + esc(promptText(pane)) + '</span>cat kakejiku.txt' });
+        var gold = tx('「デタッチしても、セッションはそのまま。」');
+        pane.lines.push({ html: '<span class="sh-gold">' + esc(gold) + '</span>', text: gold });
+        S.q0 = { id: pane.id };
+        S.target = pane.id;
+      },
+      check: function () { var h = T.findPane(S.session, S.q0.id); return !!h && !!h.pane.pasted; },
+      step: function () { return S.clipboard ? [2, 2, 'ここに貼り付ける'] : [1, 2, '1 行コピーする']; },
+      next: function () {
+        var h = T.findPane(S.session, S.q0.id);
+        if (!h) return null;
+        var p = h.pane;
+        // Back to the pane the line is in first.
+        var back = moveTo(S.q0.id);
+        if (back) return back;
+        if (p.mode === 'copy') {
+          if (p.sel == null) return mv(['Space'], 'Space を押す（選び始める）', true);
+          return mv(['Enter'], 'Enter を押す（この行をコピーする）', true);
+        }
+        if (S.clipboard) return mv([']'], '] を押す（貼り付ける）');
+        return mv(['['], '[ を押す（コピーモードに入る）');
+      }
     }
   };
 
@@ -1665,7 +1831,7 @@
     split_lr: '左右に分割', split_tb: '上下に分割', focus: 'ペイン移動', zoom: '全画面', unzoom: '全画面を戻す',
     close: 'ペインを閉じる', new_window: 'ウィンドウ作成', select_window: 'ウィンドウ移動', resize: '大きさ変更', swap: '入れ替え',
     rename: '名前を変える', kill_window: 'ウィンドウを閉じる', copy_top: 'スクロール', find_zoom: '移動して全画面', trident: '三分割',
-    two_akima: '二つ閉じる', new_and_home: '作って戻る', swap_zoom: '入れ替えて全画面'
+    two_akima: '二つ閉じる', new_and_home: '作って戻る', swap_zoom: '入れ替えて全画面', detach_attach: 'デタッチと復帰', yank_paste: 'コピーと貼り付け'
   };
   function typeName(t) { return TYPE_NAMES[t] ? tx(TYPE_NAMES[t]) : t; }
 
@@ -1794,6 +1960,8 @@
       loadQuestion();
       render();
       startClock();
+      // The tab was left during the countdown: the clock must not run.
+      if (document.hidden || !document.hasFocus()) pauseRun();
     };
     b.timer = setTimeout(step, reduceMotion ? 250 : 650);
     render();
@@ -1845,6 +2013,7 @@
     S.confirm = null;
     S.prompt = null;
     S.picker = null;
+    hidePaneNumbers();
     S.qText = null;
     S.qGoal = null;
     S.qNote = [];
@@ -1919,6 +2088,8 @@
     loadQuestion();
     render();
     startClock();
+    // The tab was left during the hold: the clock must not run.
+    if (document.hidden || !document.hasFocus()) pauseRun();
   }
 
   function miss() {
@@ -2367,6 +2538,12 @@
         '<div class="sh-line"><span class="sh-prompt">$ </span>' + withCursor(S.outer.input, S.outer.cur, true) + '</div></div></div>';
       var ob = $('.outer-body', term);
       ob.scrollTop = ob.scrollHeight;
+      // The order follows you outside: the card sits in the lower half.
+      var orun = S.run;
+      if (orun && orun.phase === 'play' && orun.q) {
+        var ofold = folded(orun);
+        placeCard(term, term.clientWidth / 2, term.clientHeight * 0.66, motdHTML(orun, ofold ? null : guideMove(orun), ofold), '', '');
+      }
       return;
     }
     var win = T.activeWindow(S.session);
@@ -2497,7 +2674,13 @@
       view.borders = bhtml;
     }
     // 完成図: what this question wants changed, marked on the rooms.
-    $$(':scope > .goal, :scope > .goal-arrow, :scope > .goal-key, :scope > .guide-card, :scope > .here-tag', term).forEach(function (x) { x.remove(); });
+    $$(':scope > .goal, :scope > .goal-arrow, :scope > .goal-key, :scope > .guide-card, :scope > .here-tag, :scope > .dp-num', term).forEach(function (x) { x.remove(); });
+    // display-panes: the numbers, big, on every pane.
+    if (S.panesShown && Date.now() < S.panesShown) {
+      lay.panes.forEach(function (r) {
+        term.insertAdjacentHTML('beforeend', '<div class="dp-num' + (r.pane.id === win.active ? ' active' : '') + '" style="left:' + (r.x * cw) + 'px;top:' + (r.y * ch) + 'px;width:' + (r.w * cw) + 'px;height:' + (r.h * ch) + 'px">' + T.paneIndex(S.session, win, r.pane) + '</div>');
+      });
+    }
     var labelled = false, anchor = null;
     marks.forEach(function (g) {
       if (!g.pane) return;
@@ -2729,6 +2912,10 @@
   }
 
   function pickerHTML() {
+    if (S.picker.kind === 'buffer') {
+      return '<div class="picker" role="listbox" aria-label="' + tx('バッファ') + '"><div class="picker-head">' + tx('(choose-buffer)  Enter で貼る') + '</div>' +
+        '<div class="picker-row on">(0) buffer0000: ' + S.clipboard.length + ' bytes: "' + esc(S.clipboard.split('\n')[0].slice(0, 40)) + '"</div></div>';
+    }
     var html = '<div class="picker" role="listbox" aria-label="' + tx('セッション') + '">';
     html += '<div class="picker-head">' + tx('(choose-tree)  ↑↓ で選んで Enter') + '</div>';
     S.sessions.forEach(function (s, i) {
@@ -2908,12 +3095,12 @@
     var html = '<span class="st-session">[' + esc(S.session.name) + ']</span><span class="st-wins">';
     S.session.windows.forEach(function (w) {
       var flag = w.id === S.session.active ? '*' : (w.id === S.session.last ? '-' : '');
-      if (w.id === S.session.active && w.zoomed) flag += 'Z';
+      if (w.zoomed) flag += 'Z';
       var g = tabGoal(w.id);
       html += '<span class="st-win' + (w.id === S.session.active ? ' cur' : '') + (g ? ' goal-tab' + (g.mark === 'close' ? ' close' : '') : '') + '">' + w.index + ':' + esc(w.name) + flag + (g ? '<span class="goal-tag">' + esc(g.tag) + '</span>' : '') + '</span>';
     });
     var gn = tabGoal('+');
-    if (gn) html += '<span class="st-win goal-tab new">' + S.session.windows.length + ':＋<span class="goal-tag">' + esc(gn.tag) + '</span></span>';
+    if (gn) html += '<span class="st-win goal-tab new">' + nextWindowIndex() + ':＋<span class="goal-tag">' + esc(gn.tag) + '</span></span>';
     html += '</span><span class="st-right">';
     if (S.armed) html += '<span class="st-prefix">PREFIX</span>';
     else if (Date.now() < S.repeatUntil) html += '<span class="st-prefix repeat">REPEAT</span>';
@@ -2928,6 +3115,15 @@
       var over = tab.getBoundingClientRect().right - wins.getBoundingClientRect().right;
       if (over > 0) wins.scrollLeft = over + 4;
     }
+  }
+
+  // The number new-window would give, as createWindow does.
+  function nextWindowIndex() {
+    var used = {};
+    S.session.windows.forEach(function (w) { used[w.index] = true; });
+    var i = S.session.baseIndex;
+    while (used[i]) i++;
+    return i;
   }
 
   function clock() {
@@ -3308,7 +3504,8 @@
     var key = id + '|' + span;
     var cached = S.boardCache && S.boardCache[key];
     // From a file:// page nothing is fetched: say so instead of loading forever.
-    var offline = !NET || !/^https?:$/.test(location.protocol);
+    // A local test server (?api=http://localhost…) counts as online from a file:// page.
+    var offline = !NET || (!/^https?:$/.test(location.protocol) && !/^http:\/\/(localhost|127\.0\.0\.1)/.test(NET.API));
     var table = function (rows) {
       if (!rows.length) return '<p class="rec-empty">' + tx(span === 'today' ? 'まだ今日の記録はない。一番乗りの好機。' : 'まだ記録がない。') + '</p>';
       return '<table class="rec-table board"><thead><tr><th>' + tx('位') + '</th><th>' + tx('名前') + '</th><th>' + tx('タイム') + '</th><th class="r-note">' + tx('日付') + '</th></tr></thead><tbody>' +
@@ -3658,6 +3855,8 @@
     document.addEventListener('keydown', onKeyDown);
     var sink = $('#sink');
     sink.addEventListener('input', onSinkInput);
+    sink.addEventListener('compositionstart', function () { S.composing = true; imeNote(); });
+    sink.addEventListener('compositionend', function () { S.composing = false; sink.value = ''; });
     $('#term').addEventListener('pointerdown', function () { focusSink(); });
     document.addEventListener('visibilitychange', function () { if (document.hidden) pauseRun(); });
     window.addEventListener('pagehide', function () { if (S.run && S.run.phase !== 'done') count('quit', S.run.i); });

@@ -108,7 +108,7 @@ test('everything else is listed with a reason, never dropped silently', () => {
     'setw -g mode-keys vi',
     "set -g @plugin 'tmux-plugins/tmux-resurrect'",
     'bind -T copy-mode-vi v send -X begin-selection',
-    'bind q display-panes',
+    'bind q clock-mode',
     'if-shell "test -f ~/.local.conf" "source ~/.local.conf"',
     'bind Q kill-session'
   ].join('\n'));
@@ -116,6 +116,21 @@ test('everything else is listed with a reason, never dropped silently', () => {
   assert.equal(c.skipped.length, 8);
   assert.ok(c.skipped.every((s) => s.why && s.no >= 1 && s.line));
   assert.equal(c.custom, false, 'nothing taken: still the defaults');
+});
+
+test('base-index and pane-base-index are taken; the keys the tips name are understood', () => {
+  const c = C.parse('set -g base-index 1\nsetw -g pane-base-index 1\nbind q display-panes\nbind C-o rotate-window\nbind PageUp copy-mode -u\nbind b choose-buffer');
+  assert.equal(c.baseIndex, 1);
+  assert.equal(c.paneBaseIndex, 1);
+  assert.equal(c.used.length, 6);
+  assert.equal(c.skipped.length, 0);
+  assert.equal(c.custom, true);
+  assert.equal(C.lookup(c, 'prefix', ev('q')).act.key, 'q');
+  assert.equal(C.lookup(c, 'prefix', ev('o', { ctrl: true })).act.ctrl, true);
+  assert.equal(C.lookup(c, 'prefix', ev('PageUp')).act.key, 'PageUp');
+  assert.equal(C.lookup(c, 'prefix', ev('b')).act.key, '=');
+  assert.equal(C.parse('set -g base-index 1').custom, true, 'a base-index alone is a setting of its own');
+  assert.equal(C.parse('set -g base-index x').skipped.length, 1, 'an unreadable number is listed');
 });
 
 test('a later bind of the same key wins; long lines join with a backslash', () => {
