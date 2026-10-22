@@ -39,6 +39,7 @@ test('?api= points the page at a local server, and only a local one', () => {
   const api = (search) => load(['levels.js', 'records.js', 'net.js'], { search }).ADV.net.API;
   assert.equal(api('?api=http://localhost:8787'), 'http://localhost:8787');
   assert.equal(api('?api=http://127.0.0.1:9000/'), 'http://127.0.0.1:9000');
+  assert.equal(api('?api=staging'), 'https://tmux-da-api-staging.starrydata-mcp-cloudflare.workers.dev');
   const real = api('');
   assert.match(real, /^https:\/\/tmux-da-api\..+\.workers\.dev$/);
   for (const evil of ['?api=https://evil.example', '?api=http://localhost.evil.example', '?api=http://localhost@evil.example', '?api=javascript:alert(1)']) {

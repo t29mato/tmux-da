@@ -9,7 +9,8 @@
     "test:game": "node web/test/playthrough.mjs",
     "test:online": "scripts/test.sh online",
     "stats": "node scripts/stats.mjs",
-    "deploy:server": "cd server && wrangler deploy"
+    "deploy:server": "cd server && wrangler deploy",
+    "deploy:staging": "cd server && wrangler deploy --env staging"
   },
   "devDependencies": {
     "playwright": "1.64.1",

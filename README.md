@@ -50,12 +50,20 @@ python3 -m http.server -d web 8000       # または http://localhost:8000/
 
 ## サーバ（`server/`）
 
-ランキングと引き継ぎのための小さな API。Cloudflare Workers ＋ D1（SQLite）。アカウントは無く、合言葉は SHA-256 だけを保存する。記録の検証（1 問題 0.25 秒未満や、合計が合わない記録は弾く）と、アドレスごとの回数制限をする。
+ランキングと引き継ぎのための小さな API。Cloudflare Workers ＋ D1（SQLite）。アカウントは無く、合言葉は SHA-256 だけを保存する。記録の検証（1 問あたり平均 0.4 秒未満、1 問 0.1 秒未満、合計が合わない記録、途中で長く止まった記録、順番を変えた回は弾く）と、アドレスごとの回数制限をする。
 
 ```bash
 cd server
 npx wrangler d1 execute tmux-da --remote --file schema.sql   # 表を作る（初回だけ）
 npx wrangler deploy
+```
+
+ステージング（本番と別の Worker と D1）。試しの名前や記録はこちらへ送る。ページは `?api=staging` を付けるとこちらにつながる。
+
+```bash
+cd server
+npx wrangler d1 execute tmux-da-staging --remote --file schema.sql   # 初回だけ
+npx wrangler deploy --env staging      # https://tmux-da-api-staging.starrydata-mcp-cloudflare.workers.dev
 ```
 
 ## テスト

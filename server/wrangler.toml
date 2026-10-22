@@ -6,3 +6,13 @@ compatibility_date = "2026-10-01"
 binding = "DB"
 database_name = "tmux-da"
 database_id = "c7d64a60-2208-42a7-926f-94b276778e58"
+
+# Staging: its own Worker and database, for trying changes and for test
+# players. `npx wrangler deploy --env staging`; the page uses it with ?api=staging.
+[env.staging]
+name = "tmux-da-api-staging"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "tmux-da-staging"
+database_id = "85d4f6f6-2e4c-43cd-a002-855dca55af43"
