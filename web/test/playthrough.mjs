@@ -151,6 +151,13 @@ async function solve(page, prefix, prefixOpt) {
       break;
     case 'new_and_home': await p('c'); await p(String(s.run.goal.index)); break;
     case 'detach_attach': await p('d'); await page.keyboard.type('tmux attach'); await page.keyboard.press('Enter'); break;
+    case 'session_new':
+      await p(':'); await page.keyboard.type('new -s ' + s.run.goal.name); await page.keyboard.press('Enter');
+      // Back by the list: the number of the home row (sessions are in name order).
+      await p('s'); await page.keyboard.press(String((await st(page)).sessions.indexOf(s.run.goal.home)));
+      break;
+    case 'session_switch': await p('s'); await page.keyboard.press(String(s.sessions.indexOf(s.run.goal.name))); break;
+    case 'session_attach': await p('d'); await page.keyboard.type('tmux attach -t ' + s.run.goal.name); await page.keyboard.press('Enter'); break;
     case 'yank_paste':
       await p('[');
       for (const key of ['ArrowUp', 'Home', 'Space', 'End', 'Enter']) await page.keyboard.press(key);
@@ -167,7 +174,11 @@ async function followGuide(page, prefix) {
   const mv = s.run.next;
   if (!mv) return false;
   if (mv.pfx) await page.keyboard.press(prefix);
-  if (mv.type) { await page.keyboard.type(mv.type); await page.keyboard.press('Enter'); return true; }
+  if (mv.type) {
+    if (/Ctrl\+u/.test(mv.text)) await page.keyboard.press('Control+u');
+    await page.keyboard.type(mv.type); await page.keyboard.press('Enter');
+    return true;
+  }
   if (!mv.keys.length) {
     // The rename prompt: written as words, with the name the order asks for.
     await page.keyboard.press('Control+u'); await page.keyboard.type(s.run.goal); await page.keyboard.press('Enter');
@@ -1193,7 +1204,7 @@ async function continuity(browser, id) {
       houses.add(raw.house);
       const same = raw.activePane === end.activePane && raw.activeIndex === end.activeIndex;
       if (same) kept++; else focusMoved++;
-      const grew = raw.panes.length > end.panes.length || raw.windows.length > end.windows.length;
+      const grew = raw.panes.length > end.panes.length || raw.windows.length > end.windows.length || raw.sessions.length > end.sessions.length;
       const unz = end.windows.find((w) => w.active).zoomed && !raw.windows.find((w) => w.active).zoomed;
       const zoomed = !end.windows.find((w) => w.active).zoomed && raw.windows.find((w) => w.active).zoomed;
       if (raw.run.note.length) notes++;
@@ -1622,6 +1633,146 @@ async function loop3(browser) {
   await ctx.close();
 }
 
+// Round 4: the session questions of 上級 (session_new, session_switch,
+// session_attach): the guide solves each, the status bar's [name] and the
+// list row carry the mark, the house goes on in whichever session you end
+// in, slips (a wrong name, a renamed session, a detach, attach without -t)
+// are led back, and the English is complete.
+async function loop4(browser) {
+  const L = '[loop4]';
+  const SESS = ['session_new', 'session_switch', 'session_attach'];
+  const walkTo = async (page, pred) => {
+    for (let g = 0; g < 300; g++) {
+      const s = await st(page);
+      if (!s.run || s.run.phase !== 'play') return null;
+      if (pred(s)) return s;
+      await followGuide(page, 'Control+b');
+    }
+    return null;
+  };
+  // The state once the question `at` is over (the next one, or the result
+  // when it was the last), or null when the guide ran dry.
+  const solveByGuide = async (page, at) => {
+    for (let k = 0; k < 30; k++) {
+      const now = await st(page);
+      if (!now.run || now.run.i !== at || now.run.phase !== 'play') { now.solved = !now.run || now.run.i === at + 1 || now.run.phase !== 'play'; return now; }
+      if (!now.run.next) return null;
+      await followGuide(page, 'Control+b');
+    }
+    return null;
+  };
+  // 1: by the guide, with the marks on the way.
+  let ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  let page = await ctx.newPage();
+  let errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#course-list [data-course="hard"]');
+  await waitPlay(page);
+  const first = await st(page);
+  ok(SESS.every((t) => first.run.qs.includes(t)) && first.run.qs.length === 16, L + ' 上級 asks the three session questions among its 16 (' + first.run.qs.filter((t) => SESS.includes(t)).join(',') + ')');
+  const seen = {};
+  for (;;) {
+    const s = await walkTo(page, (x) => SESS.includes(x.run.type) && !seen[x.run.type]);
+    if (!s) break;
+    const type = s.run.type, at = s.run.i;
+    seen[type] = true;
+    const bar = await page.$eval('#status', (e) => ({ mark: !!e.querySelector('.st-session.goal-tab'), text: e.textContent }));
+    ok(bar.mark && bar.text.indexOf('[' + s.session + ']') === 0, L + ' ' + type + ': the status bar marks the session name (' + bar.text.slice(0, 40) + ')');
+    if (type !== 'session_switch') ok(/手順 1\//.test(await page.$eval('#term .guide-card', (e) => e.textContent).catch(() => '')), L + ' ' + type + ': the card shows step 1 of the question');
+    await shot(page, 'loop4-' + type);
+    if (type === 'session_switch') {
+      // The list opens with s: the wanted row is marked, and the guide goes on inside it.
+      await followGuide(page, 'Control+b');
+      const row = await page.$eval('#term .picker', (e) => ({ goal: e.querySelector('.picker-row.goal-row') && e.querySelector('.picker-row.goal-row').textContent, rows: e.querySelectorAll('.picker-row').length })).catch(() => null);
+      ok(row && row.rows >= 3 && row.goal && row.goal.indexOf(s.run.goal.name) >= 0, L + ' session_switch: s opens the list of 3+ sessions with the wanted row marked (' + (row && row.goal) + ')');
+      const nx = (await st(page)).run.next;
+      ok(nx && /^(↑|↓|Enter)$/.test(nx.keys[0]) && !nx.pfx, L + ' session_switch: inside the list the guide says ↑ ↓ or Enter, no prefix (' + (nx && nx.keys[0]) + ')');
+      await shot(page, 'loop4-picker');
+    }
+    if (type === 'session_attach') {
+      await followGuide(page, 'Control+b');
+      const out = await st(page);
+      ok(out.detached && out.run.next && out.run.next.type === 'tmux ls', L + ' session_attach: after d the guide asks for tmux ls first');
+      await followGuide(page, 'Control+b');
+      const nx = (await st(page)).run.next;
+      ok(nx && nx.type === 'tmux attach -t ' + s.run.goal.name, L + ' session_attach: then tmux attach -t ' + s.run.goal.name + ' (' + (nx && nx.type) + ')');
+      await shot(page, 'loop4-outside');
+    }
+    const done = await solveByGuide(page, at);
+    ok(!!done && done.solved, L + ' ' + type + ' is solved by the guide');
+    if (!done || !done.solved) break;
+    const want = type === 'session_new' ? s.run.goal.home : s.run.goal.name;
+    ok(done.session === want, L + ' ' + type + ' ends in session ' + want + ' (in ' + done.session + ')');
+    ok(done.sessions.join() === done.sessions.slice().sort().join(), L + ' sessions stay in name order (' + done.sessions.join(',') + ')');
+    ok((done.run ? done.run.misses : done.result.misses) === s.run.misses, L + ' ' + type + ': no wrong key on the way');
+    if (!done.run) break;
+  }
+  ok(Object.keys(seen).length === 3, L + ' all three session questions were met (' + Object.keys(seen).join(',') + ')');
+  await walkTo(page, () => false);
+  await waitResult(page, L);
+  ok(!errors.length, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+
+  // 2: slips on each, then the guide.
+  const SLIPS = {
+    session_new: async (p) => { await p.keyboard.press('Control+b'); await p.keyboard.press(':'); await p.keyboard.type('new -s zzz'); await p.keyboard.press('Enter'); },
+    session_switch: async (p) => { await p.keyboard.press('Control+b'); await p.keyboard.press('$'); await p.keyboard.type('x'); await p.keyboard.press('Enter'); await p.keyboard.press('Control+b'); await p.keyboard.press('d'); },
+    session_attach: async (p) => { await p.keyboard.press('Control+b'); await p.keyboard.press('d'); await p.keyboard.type('tmux attach'); await p.keyboard.press('Enter'); }
+  };
+  ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  page = await ctx.newPage();
+  errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#course-list [data-course="hard"]');
+  await waitPlay(page);
+  const slipped = {};
+  for (;;) {
+    const s = await walkTo(page, (x) => SESS.includes(x.run.type) && !slipped[x.run.type]);
+    if (!s) break;
+    const type = s.run.type, at = s.run.i;
+    slipped[type] = true;
+    await SLIPS[type](page);
+    const mid = await st(page);
+    if (type === 'session_new') ok(mid.session === 'zzz' && /「zzz」ができた/.test(mid.run.next.text), L + ' session_new: a session of the wrong name is said (' + mid.run.next.text + ')');
+    if (type === 'session_switch') ok(mid.detached && mid.run.order.indexOf(s.run.goal.name) >= 0, L + ' session_switch: renamed home and detached, the order still names ' + s.run.goal.name);
+    if (type === 'session_attach') ok(!mid.detached && mid.session !== s.run.goal.name && /^d$/.test(mid.run.next.keys[0]), L + ' session_attach: tmux attach without -t came back to ' + mid.session + '; the guide says d again');
+    const done = await solveByGuide(page, at);
+    ok(!!done && done.solved, L + ' after the slip the guide still solves ' + type);
+    if (!done || !done.solved || !done.run) break;
+  }
+  ok(Object.keys(slipped).length === 3, L + ' slips tried on all three (' + Object.keys(slipped).join(',') + ')');
+  ok(!errors.length, L + ' no page errors after slips' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+
+  // 3: in English, nothing Japanese and nothing missing on the session questions.
+  ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce', locale: 'en-US' });
+  page = await ctx.newPage();
+  errors = watch(page);
+  const missing = new Set();
+  page.on('console', (m) => { if (/\[i18n\]/.test(m.text())) missing.add(m.text()); });
+  await page.goto(PAGE);
+  const desc = await page.$eval('#course-list [data-course="hard"]', (e) => e.textContent);
+  ok(/attach -t/.test(desc) && !/[ぁ-んァ-ヶ一-龠]/.test(desc), L + ' the English 上級 card mentions sessions');
+  await page.click('#course-list [data-course="hard"]');
+  await waitPlay(page);
+  const jp = new Set();
+  for (let g = 0; g < 300; g++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    if (SESS.includes(s.run.type)) {
+      const txt = await page.evaluate(() => [...document.querySelectorAll('#term .guide-card, #status, #term .picker, #term .outer-body')].map((e) => e.textContent).join(' | '));
+      (txt.match(/[^|]*[ぁ-んァ-ヶ一-龠][^|]*/g) || []).forEach((t) => jp.add(t.trim().slice(0, 50)));
+    }
+    await followGuide(page, 'Control+b');
+  }
+  await waitResult(page, L + ' en');
+  ok(!jp.size, L + ' no Japanese on the session questions in English' + (jp.size ? ': ' + [...jp].join(' | ') : ''));
+  ok(!missing.size, L + ' every session text has its English' + (missing.size ? ': ' + [...missing].join(' | ') : ''));
+  await shot(page, 'loop4-en-result');
+  ok(!errors.length, L + ' no page errors in English' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -1652,6 +1803,7 @@ const parts = [
   ['longview', longView],
   ['loop2', loop2],
   ['loop3', loop3],
+  ['loop4', loop4],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
