@@ -279,7 +279,7 @@ async function course(browser, prefixOpt, id, viewport, scheme, tag, platform = 
   await waitResult(page, label);
   const s = await st(page);
   ok(s.result && s.result.time > 0 && s.result.record, label + ' the result has a time (' + (s.result ? s.result.time.toFixed(1) : '-') + 's) and is a new record');
-  ok(/奥の間に辿り着いた/.test(await page.$eval('#result-body', (e) => e.textContent)), label + ' the result says the inner room was reached');
+  ok(/\d+ 問、解き終わった/.test(await page.$eval('#result-body .em-title', (e) => e.textContent)), label + ' the result says the course is done');
   ok(/お手本/.test(await page.$eval('#result-body .em-verdict', (e) => e.textContent)), label + ' the result compares with the お手本 time');
   if (id === 'easy') ok(s.result.misses >= 1, label + ' the miss is in the result');
   await shot(page, `result-${tag}`);
@@ -611,7 +611,7 @@ async function ownConf(browser) {
   await page.click('#conf-apply');
   const c = (await st(page)).conf;
   ok(c && c.prefix === 'Ctrl+a', L + ' the prefix is Ctrl+a');
-  ok(/合図 Ctrl\+a/.test(await page.$eval('#conf-state', (e) => e.textContent)), L + ' the box says so');
+  ok(/prefix Ctrl\+a/.test(await page.$eval('#conf-state', (e) => e.textContent)), L + ' the box says so');
   ok(await page.$$eval('#conf-report > ul li', (e) => e.length) === 13, L + ' 13 lines are used');
   ok(/読み飛ばした 3 行/.test(await page.$eval('#conf-report', (e) => e.textContent)), L + ' 3 lines are listed as passed over');
   await page.click('#course-list [data-course="normal"]');
@@ -961,7 +961,6 @@ async function learning(browser) {
   ok(/Lv\.\d+/.test(await page.$eval('#skill', (e) => e.textContent)), L + ' the title shows the 腕前: ' + (await page.$eval('#skill .sk-row', (e) => e.textContent)));
   ok(/腕前 Lv\.\d+/.test(await page.$eval('#title-meta', (e) => e.textContent)), L + ' the top bar shows the 腕前');
   ok(await page.$eval('#btn-keiko', (e) => !e.hidden && /大きさ変更/.test(e.textContent)), L + ' the 稽古の間 offers the weak type');
-  ok((await st(page)).quiet === true && await page.evaluate(() => document.body.dataset.quiet === '1'), L + ' the house is quiet by default');
   await shot(page, 'title-skill');
 
   // Keyboard: 1 enters the first house.
@@ -999,7 +998,7 @@ async function learning(browser) {
   ok(s.run.course === 'keiko' && s.run.n === 9 && s.run.qs.includes('resize'), L + ' K enters the 稽古の間: 9 questions of the weak types (' + s.run.qs.join(',') + ')');
   await playCourse(page, 'Control+b', 'C-b', L + ' keiko', 'guide');
   await waitResult(page, L + ' keiko');
-  ok(/稽古を終えた/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' the 稽古 result says so');
+  ok(/苦手の稽古 9 問、解き終わった/.test(await page.$eval('#result-body .em-title', (e) => e.textContent)), L + ' the 稽古 result says so');
   ok(!(await page.$('#result-body .name-form')), L + ' a 稽古 run is not offered for the boards');
   // Enter right away (a key held from the last question) does nothing; then it replays.
   await page.keyboard.press('Enter');
@@ -1014,12 +1013,107 @@ async function learning(browser) {
   ok(/覚えた問題/.test(await page.$eval('#records-body', (e) => e.textContent)), L + ' the 絵巻 lists what is learnt');
   await page.keyboard.press('Escape');
   ok((await st(page)).screen === 'title', L + ' Esc goes back');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
 
-  // Quiet off: the decoration may move; the choice is kept.
-  await page.click('.quiet-toggle');
-  ok(await page.evaluate(() => document.body.dataset.quiet === '0'), L + ' 静 toggles the quiet house off');
-  await page.reload();
-  ok((await st(page)).quiet === false, L + ' and the choice is kept');
+// The screen round the guide: the card never hides a pane number or the
+// copy indicator, いまここ stays inside its pane, the card stays through a
+// y/n, the wanted tab is on screen on a phone, Esc twice quits, the records
+// keep their shape, and file:// says the ranking is offline.
+async function uxScreens(browser) {
+  const L = '[ux]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#course-list [data-course="hard"]');
+  await waitPlay(page);
+  // Rects inside the terminal: the card, the numbers, いまここ, the indicator.
+  const geometry = () => page.evaluate(() => {
+    const term = document.querySelector('#term').getBoundingClientRect();
+    const rect = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; };
+    const overlap = (a, b) => Math.max(0, Math.min(a.r, b.r) - Math.max(a.l, b.l)) * Math.max(0, Math.min(a.b, b.b) - Math.max(a.t, b.t));
+    const card = document.querySelector('#term > .guide-card');
+    const here = document.querySelector('#term > .here-tag');
+    const active = document.querySelector('#term > .pane.active');
+    const covered = [];
+    if (card) {
+      const c = rect(card);
+      document.querySelectorAll('#term > .pane .pnum, #term > .pane [data-copy-ind]').forEach((e) => { const o = overlap(c, rect(e)); if (o > 0) covered.push(e.className + ':' + Math.round(o)); });
+    }
+    let hereOut = false, hereOnInd = false;
+    if (here && active) {
+      const h = rect(here), a = rect(active);
+      hereOut = h.l < a.l - 1 || h.r > a.r + 1 || h.t < a.t - 1;
+      const ind = active.querySelector('[data-copy-ind]');
+      if (ind) hereOnInd = overlap(h, rect(ind)) > 0;
+    }
+    return { card: !!card, covered, hereOut, hereOnInd, width: term.width };
+  });
+  let bad = [], noCard = 0, steps = 0, confirmSeen = false, copySeen = false;
+  for (let guard = 0; guard < 300; guard++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    const g = await geometry();
+    steps++;
+    if (!g.card) noCard++;
+    if (g.covered.length) bad.push(s.run.type + ' covers ' + g.covered.join(','));
+    if (g.hereOut) bad.push(s.run.type + ' いまここ outside its pane');
+    if (g.hereOnInd) bad.push(s.run.type + ' いまここ on the copy indicator');
+    if (s.copyMode) copySeen = true;
+    if (/kill-window .*\(y\/n\)/.test(await page.$eval('#status', (e) => e.textContent))) {
+      confirmSeen = true;
+      ok(g.card, L + ' the card stays while kill-window asks y/n');
+    }
+    await followGuide(page, 'Control+b');
+  }
+  ok(steps > 20 && copySeen && confirmSeen, L + ' a whole 上級 run watched (' + steps + ' steps, copy mode and a kill-window confirm seen)');
+  ok(noCard === 0, L + ' the guide card is on screen at every step (' + noCard + ' without)');
+  ok(bad.length === 0, L + ' the card and いまここ never hide a number or the indicator' + (bad.length ? ': ' + [...new Set(bad)].join(' | ') : ''));
+  await waitResult(page, L);
+  ok(await page.$$eval('#result-body .em-slow li', (l) => l.length) === 3 && /秒/.test(await page.$eval('#result-body .em-slow', (e) => e.textContent)), L + ' the result lists the three slowest questions');
+  ok(!(await page.$('#result-body .rod')) && /^\d+ 回目$/.test(await page.$eval('#result-body .em-hd', (e) => e.textContent.trim())), L + ' the result sheet has no rods and a plain run number');
+  // Esc twice with nothing open: back to the title; once does nothing.
+  await page.click('#result-body [data-title]');
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  await page.keyboard.press('Escape');
+  ok((await st(page)).screen === 'game' && /Esc/.test(await page.$eval('#status', (e) => e.textContent)), L + ' one Esc stays and says Esc again quits');
+  await page.waitForTimeout(1200);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  ok((await st(page)).screen === 'title', L + ' Esc twice within a second quits to the title');
+  ok(/Esc/.test(await page.$eval('.quit', (e) => e.title)), L + ' the やめる button says so');
+  // The top bar names the prefix, not 合図.
+  ok(!/合図/.test(await page.$eval('.topbar', (e) => e.textContent)), L + ' no 合図 in the top bar');
+  // Records: the course row keeps its space on 引き継ぎ; file:// says offline.
+  await page.click('#btn-records');
+  const h1 = await page.$eval('#records-screen .rec-seg', (e) => [e.offsetHeight, getComputedStyle(e).visibility].join());
+  await page.click('[data-rec-tab="sync"]');
+  const h2 = await page.$eval('#records-screen .rec-seg', (e) => [e.offsetHeight, getComputedStyle(e).visibility].join());
+  ok(h1.endsWith('visible') && h2.endsWith('hidden') && h1.split(',')[0] === h2.split(',')[0], L + ' the course row is hidden but keeps its height on 引き継ぎ (' + h1 + ' → ' + h2 + ')');
+  await page.click('[data-rec-tab="board"]');
+  ok(/オフライン/.test(await page.$eval('#records-body', (e) => e.textContent)), L + ' from file:// the ranking says it is offline');
+  await page.click('#btn-records-back');
+  // A phone: the wanted tab is in view on the status bar.
+  await page.setViewportSize(PHONE);
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  let tabSeen = 0, tabOut = 0;
+  for (let guard = 0; guard < 120; guard++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    const t = await page.evaluate(() => {
+      const tab = document.querySelector('#status .goal-tab');
+      if (!tab) return null;
+      const r = tab.getBoundingClientRect(), w = document.querySelector('#status .st-wins').getBoundingClientRect();
+      return r.left >= w.left - 1 && r.right <= w.right + 1;
+    });
+    if (t != null) { tabSeen++; if (!t) tabOut++; }
+    await followGuide(page, 'Control+b');
+  }
+  ok(tabSeen > 0 && tabOut === 0, L + ' on a phone the wanted tab is always in view (' + tabSeen + ' seen, ' + tabOut + ' cut off)');
   ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await ctx.close();
 }
@@ -1147,6 +1241,7 @@ const parts = [
   ['editing', lineEditing],
   ['records', records],
   ['learning', learning],
+  ['ux', uxScreens],
   ['longview', longView],
   ['sound', sound]
 ];
