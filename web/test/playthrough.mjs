@@ -2192,6 +2192,74 @@ async function loop8(browser) {
   await ctx.close();
 }
 
+// Accessibility and small screens: contrast of the marks that failed WCAG AA,
+// the sheets hand the focus to their title, the inputs have names, the key
+// bar's buttons are big enough and nothing overflows at 360px.
+async function loop9(browser) {
+  const L = '[loop9]';
+  // contrast of an element's text against the background behind it
+  const contrast = (sel) => {
+    const parse = (c) => { const m = c.match(/[\d.]+/g); return [+m[0], +m[1], +m[2], m.length > 3 ? +m[3] : 1]; };
+    const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+    const blend = (fg, bg) => { const a = fg[3]; return [fg[0] * a + bg[0] * (1 - a), fg[1] * a + bg[1] * (1 - a), fg[2] * a + bg[2] * (1 - a), 1]; };
+    const el = document.querySelector(sel); if (!el) return -1;
+    let bg = null, op = 1;
+    for (let e = el; e && e !== document.documentElement; e = e.parentElement) {
+      const cs = getComputedStyle(e); op *= parseFloat(cs.opacity); const c = parse(cs.backgroundColor);
+      if (c[3] > 0) { bg = bg ? blend(bg, c) : c; if (c[3] >= 1) break; }
+    }
+    bg = bg || parse(getComputedStyle(document.body).backgroundColor);
+    const fg = parse(getComputedStyle(el).color); fg[3] *= op;
+    const a = lum(blend(fg, bg)), b = lum(bg);
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  };
+  for (const [tag, scheme, locale] of [['light ja', 'light', 'ja-JP'], ['dark en', 'dark', 'en-US']]) {
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 740 }, colorScheme: scheme, locale, reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    const errors = watch(page);
+    await page.goto(PAGE);
+    const sw = () => page.evaluate(() => document.documentElement.scrollWidth);
+    ok((await sw()) <= 360, L + ' ' + tag + ' the title fits 360px across (' + (await sw()) + 'px)');
+    const cr = (sel) => page.evaluate(contrast, sel);
+    ok((await cr('#conf-state')) >= 4.5, L + ' ' + tag + ' 既定 next to キー設定 reads at AA (' + (await cr('#conf-state')).toFixed(2) + ')');
+    ok((await cr('.today small')) >= 4.5, L + ' ' + tag + ' the 今日の問題 note reads at AA on the paper (' + (await cr('.today small')).toFixed(2) + ')');
+    ok((await cr('.hero .eyebrow')) >= 4.5, L + ' ' + tag + ' the eyebrow reads at AA (' + (await cr('.hero .eyebrow')).toFixed(2) + ')');
+    await page.click('#btn-enter');
+    await waitPlay(page);
+    ok((await sw()) <= 360, L + ' ' + tag + ' the game fits 360px across (' + (await sw()) + 'px)');
+    const keys = await page.$$eval('#keybar .key', (l) => l.map((b) => { const r = b.getBoundingClientRect(); return [b.textContent, Math.round(r.width), Math.round(r.height)]; }));
+    ok(keys.length >= 8 && keys.every((k) => k[1] >= 44 && k[2] >= 40), L + ' ' + tag + ' every key-bar button is at least 44×40 (' + keys.map((k) => k[0] + ' ' + k[1] + 'x' + k[2]).join(', ') + ')');
+    ok(await page.$eval('#keybar', (e) => e.getAttribute('role') === 'toolbar' && !!e.getAttribute('aria-label')), L + ' ' + tag + ' the key bar is a named toolbar');
+    ok((await cr('.guide-card .arr')) >= 4.5, L + ' ' + tag + ' the → between the keys on the card reads at AA (' + (await cr('.guide-card .arr')).toFixed(2) + ')');
+    ok((await cr('.guide-card .ob-q')) >= 4.5 && (await cr('.here-tag')) >= 4.5, L + ' ' + tag + ' the order and いまここ read at AA');
+    await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+    await page.click('#btn-records');
+    ok((await sw()) <= 360, L + ' ' + tag + ' the records fit 360px across (' + (await sw()) + 'px)');
+    ok(errors.length === 0, L + ' ' + tag + ' no page errors (' + errors.join('; ') + ')');
+    await ctx.close();
+  }
+  // The keyboard: the records sheet opens on its title, Tab goes into the sheet, Esc leaves.
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  await page.goto(PAGE);
+  await page.click('#btn-records');
+  const active = () => page.evaluate(() => { const a = document.activeElement; return (a.className || a.tagName) + ':' + (a.textContent || '').trim().slice(0, 6); });
+  ok(/^em-title/.test(await active()), L + ' the records sheet hands the focus to its title (' + (await active()) + ')');
+  await page.keyboard.press('Tab');
+  ok(/^入門/.test((await active()).split(':')[1]), L + ' Tab goes to the first course button in the sheet (' + (await active()) + ')');
+  ok(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle === 'solid'), L + ' the focused button shows a ring');
+  await page.click('[data-rec-tab="sync"]');
+  const labels = await page.$$eval('#records-body input', (l) => l.map((i) => i.getAttribute('aria-label')));
+  ok(labels.length === 2 && labels.every(Boolean), L + ' the sync inputs have names for a screen reader (' + labels.join(' / ') + ')');
+  await page.keyboard.press('Escape');
+  ok((await st(page)).screen === 'title', L + ' Esc leaves the records');
+  for (const sel of ['.lang-toggle', '.theme-toggle', '.wing']) {
+    await page.focus(sel);
+    ok(await page.$eval(sel, (e) => getComputedStyle(e).outlineStyle === 'solid' && parseInt(getComputedStyle(e).outlineWidth) >= 3), L + ' ' + sel + ' shows the same focus ring from the keyboard');
+  }
+  await ctx.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -2227,6 +2295,7 @@ const parts = [
   ['loop6', loop6],
   ['loop7', loop7],
   ['loop8', loop8],
+  ['loop9', loop9],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
