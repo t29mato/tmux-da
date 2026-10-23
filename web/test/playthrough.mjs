@@ -2018,6 +2018,67 @@ async function loop4(browser) {
 }
 
 
+// Round 6 (consistency): a phone can やめる from the key bar (and so end the
+// 稽古), the drill card keeps its words on a phone, the rank list does not
+// call its pace 目安, the result's subtitle does not repeat its title, the
+// question counter is 問, and a root binding's move reads as one sentence.
+async function loop6(browser) {
+  const L = '[loop6]';
+  const ctx = await browser.newContext({ viewport: PHONE, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  ok(/15 問$/.test(await page.$eval('#course-list .wing-n', (e) => e.textContent.trim())) && !/問題/.test(await page.$eval('#course-list .wing-n', (e) => e.textContent)), L + ' the course card counts questions as 問');
+  ok(/ランキングには載らない/.test(await page.$eval('.plan-note', (e) => e.textContent)), L + ' the title says a long pause keeps a run off the ranking');
+  // 稽古 on a phone: the card says the steps come later, and やめる is in the key bar.
+  await page.click('#btn-keiko');
+  await waitPlay(page);
+  const txt = await page.$eval('#term .motd .ob-guide.learnt .ob-txt', (e) => [getComputedStyle(e).display, e.textContent].join('|'));
+  ok(!txt.startsWith('none|') && /手順が出る/.test(txt), L + ' on a phone the drill card keeps its words (' + txt + ')');
+  ok(await page.$eval('#keybar .k-quit', (e) => e.offsetParent !== null && /やめる/.test(e.textContent)), L + ' the key bar has やめる on a phone');
+  ok(await page.$eval('.game-foot', (e) => e.offsetParent === null), L + ' (the buttons under the house are hidden there)');
+  await page.waitForTimeout(LV_PEEK_MS);
+  await followGuide(page, 'Control+b');
+  for (let k = 0; k < 10 && (await st(page)).run && (await st(page)).run.i === 0; k++) await followGuide(page, 'Control+b');
+  await page.click('#keybar .k-quit');
+  ok(await waitResult(page, L + ' やめる from the key bar ends the 稽古:'), L + ' the drill result follows');
+  ok(/^\d{4}年\d+月\d+日$/.test(await page.$eval('#result-body .em-sub', (e) => e.textContent.trim())), L + ' the drill result\'s subtitle is the day alone');
+  ok(/手順を見た\s*1 問(?!題)/.test(await page.$eval('#result-body .em-facts', (e) => e.textContent.replace(/\s+/g, ' '))), L + ' the facts count 問 (手順を見た 1 問)');
+  // Desktop: やめる under the house, not in the key bar; the rank list's columns.
+  await page.setViewportSize(DESKTOP);
+  await page.click('#result-body [data-title]');
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  ok(await page.$eval('#keybar .k-quit', (e) => e.offsetParent === null), L + ' on a desktop the key bar has no やめる (the button under the house is there)');
+  await page.click('.quit.to-title');
+  await page.click('#btn-records');
+  const ths = await page.$$eval('.rec-ranks th', (l) => l.map((e) => e.textContent));
+  ok(ths.includes('1 問あたり') && !ths.includes('目安'), L + ' the rank list says 1 問あたり, not 目安 (' + ths.join(',') + ')');
+  await page.click('#btn-records-back');
+  // A root binding (vim-tmux-navigator): one pair of brackets in the move.
+  await page.click('#conf-box summary');
+  await page.click('#conf-sample');
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  let rootMove = null;
+  for (let g = 0; g < 60 && !rootMove; g++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    if (s.run.next && !s.run.next.pfx && /^Ctrl\+[hjkl]$/.test(s.run.next.keys[0] || '')) rootMove = s.run.next.text;
+    else await followGuide(page, 'Control+b');
+  }
+  ok(!!rootMove && /prefix なし。/.test(rootMove) && !/）（/.test(rootMove), L + ' a navigator move says prefix なし inside its brackets (' + rootMove + ')');
+  // Own config: the result's subtitle names it.
+  await page.click('.quit.to-title');
+  await page.click('#course-list [data-course="easy"]');
+  await playCourse(page, 'Control+b', 'C-b', L, 'guide');
+  await waitResult(page, L);
+  ok(/^\d{4}年\d+月\d+日 ・ 自分のキー設定（prefix Ctrl\+b）$/.test(await page.$eval('#result-body .em-sub', (e) => e.textContent.trim())), L + ' the subtitle is the day and the key config, not the course again');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+const LV_PEEK_MS = 4300;
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -2050,6 +2111,7 @@ const parts = [
   ['loop3', loop3],
   ['loop4', loop4],
   ['loop5', loop5],
+  ['loop6', loop6],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
