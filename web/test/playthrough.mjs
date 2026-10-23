@@ -195,9 +195,12 @@ async function followGuide(page, prefix) {
   let m;
   if (label === '0-9') await page.keyboard.press(/(\d+) を押す|Press (\d+)/.exec(mv.text).slice(1).filter(Boolean)[0]);
   else if ((m = /^Ctrl\+([hjkl\\])$/.exec(label))) await page.keyboard.press('Control+' + (m[1] === '\\' ? 'Backslash' : m[1]));
-  else if ((m = /^(Ctrl|Option)\+(.)$/.exec(label))) {
+  else if ((m = /^(Ctrl|Option)\+([←→↑↓])$/.exec(label))) {
     const key = (m[1] === 'Ctrl' ? 'Control+' : 'Alt+') + ARROW[m[2]];
     for (let i = 0; i < (m[1] === 'Ctrl' ? 6 : 1); i++) await page.keyboard.press(key);
+  } else if ((m = /^(Ctrl|Option|Alt)\+(.+)$/.exec(label))) {
+    // Ctrl+Space, Alt+w: the emacs copy keys.
+    await page.keyboard.press((m[1] === 'Ctrl' ? 'Control+' : 'Alt+') + (m[2] === 'Space' ? 'Space' : m[2]));
   } else await page.keyboard.press(ARROW[label] || (label === 'Esc' ? 'Escape' : label));
   return true;
 }
@@ -656,8 +659,8 @@ async function ownConf(browser) {
   const c = (await st(page)).conf;
   ok(c && c.prefix === 'Ctrl+a', L + ' the prefix is Ctrl+a');
   ok(/prefix Ctrl\+a/.test(await page.$eval('#conf-state', (e) => e.textContent)), L + ' the box says so');
-  ok(await page.$$eval('#conf-report > ul li', (e) => e.length) === 13, L + ' 13 lines are used');
-  ok(/読み飛ばした 3 行/.test(await page.$eval('#conf-report', (e) => e.textContent)), L + ' 3 lines are listed as passed over');
+  ok(await page.$$eval('#conf-report > ul li', (e) => e.length) === 14, L + ' 14 lines are used (the copy-mode-vi v among them)');
+  ok(/関係ない 2 行/.test(await page.$eval('#conf-report', (e) => e.textContent)), L + ' 2 lines are listed as of no use to the game');
   await page.click('#course-list [data-course="normal"]');
   await waitPlay(page);
   ok(/Ctrl\+a/.test(await page.$eval('#term .motd', (e) => e.textContent)), L + ' the order bar shows Ctrl+a as the prefix');
@@ -692,6 +695,174 @@ async function ownConf(browser) {
   ok((await st(page)).conf === null, L + ' 既定に戻す brings the defaults back');
   ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await ctx.close();
+}
+
+// A tmux expert's ten-year-old .tmux.conf (prefix C-a, vi copy keys with
+// v / y, C-a C-a last-window, status bar at the top, keys bound to what the
+// game lacks): the copy questions take v and y and the guide names them,
+// the prefix twice runs last-window, = does nothing, the bar is at the
+// top, choose-tree -w shows the windows, and the report tells 未対応 apart
+// from 関係ない. In Japanese, then the copy questions in English.
+const EXPERT_CONF = [
+  'unbind C-b', 'set -g prefix C-a', 'bind C-a send-prefix',
+  'set -g base-index 1', 'setw -g pane-base-index 1', 'set -g renumber-windows on', 'set -g status-position top', 'set -g mouse on',
+  'setw -g mode-keys vi', 'set -g status-keys emacs',
+  'bind | split-window -h -c "#{pane_current_path}"', 'bind - split-window -v -c "#{pane_current_path}"', 'unbind \'"\'', 'unbind %',
+  'bind h select-pane -L', 'bind j select-pane -D', 'bind k select-pane -U', 'bind l select-pane -R',
+  'bind -r H resize-pane -L 5', 'bind -r J resize-pane -D 5', 'bind -r K resize-pane -U 5', 'bind -r L resize-pane -R 5',
+  'bind Tab last-window', 'bind C-a last-window', 'bind a last-pane', 'bind x kill-pane', 'bind X kill-window',
+  'bind S setw synchronize-panes \\; display "sync"', 'bind b break-pane -d', 'bind = select-layout tiled',
+  'bind C-s choose-tree -s', 'bind C-w choose-tree -w', 'bind g display-popup -E -w 80% -h 80% "lazygit"',
+  'bind -n M-h previous-window', 'bind -n M-l next-window', 'bind P paste-buffer', 'bind Enter copy-mode',
+  'bind -T copy-mode-vi v send-keys -X begin-selection', 'bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel "pbcopy"',
+  'bind -T copy-mode-vi C-v send-keys -X rectangle-toggle', 'bind -T copy-mode-vi Escape send-keys -X cancel',
+  "set -g @plugin 'tmux-plugins/tpm'", "set -g @plugin 'tmux-plugins/tmux-resurrect'", "set -g @continuum-restore 'on'",
+  'if-shell "test -f ~/.tmux.local.conf" "source ~/.tmux.local.conf"', "run '~/.tmux/plugins/tpm/tpm'"
+].join('\n');
+
+async function confFidelity(browser) {
+  const L = '[conf fidelity]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#conf-box summary');
+  await page.fill('#conf-text', EXPERT_CONF);
+  await page.click('#conf-apply');
+  const c = (await st(page)).conf;
+  ok(c && c.prefix === 'Ctrl+a' && c.modeKeys === 'vi' && c.statusTop === true, L + ' prefix Ctrl+a, mode-keys vi and status-position top are read (' + JSON.stringify(c) + ')');
+  const report = await page.$eval('#conf-report', (e) => e.textContent);
+  ok(/未対応 8 行/.test(report) && /関係ない 2 行/.test(report), L + ' the report tells 8 未対応 lines from 2 that do not matter (' + (report.match(/(未対応|関係ない) \d+ 行/g) || []).join(', ') + ')');
+  const mk = await page.$$eval('#conf-report > ul li', (e) => e.map((x) => x.textContent).find((t) => /mode-keys/.test(t)) || '');
+  ok(/vi 式/.test(mk) && !/見た目/.test(mk), L + ' mode-keys is a used line (vi keys), no longer 見た目の設定 (' + mk.trim() + ')');
+  const unsup = await page.$$eval('#conf-report details[open] li code', (e) => e.map((x) => x.textContent.replace(/^\d+/, '').trim()));
+  ok(unsup.some((l) => /select-layout tiled/.test(l)) && unsup.some((l) => /break-pane -d/.test(l)) && unsup.some((l) => /tmux-resurrect/.test(l)) && !unsup.some((l) => /mouse on/.test(l)),
+    L + ' = tiled, break-pane -d and the plugin are 未対応; mouse on is not (' + unsup.join(' | ') + ')');
+  await page.click('#course-list [data-course="hard"]');
+  await waitPlay(page);
+  ok(await page.evaluate(() => document.body.dataset.status === 'top' && document.querySelector('#status').getBoundingClientRect().bottom <= document.querySelector('#term').getBoundingClientRect().top),
+    L + ' the status bar sits above the panes');
+  const P = 'Control+a';
+  // Prefix twice runs the prefix key's own binding: last-window.
+  await page.keyboard.press(P); await page.keyboard.press('c');
+  let s = await st(page, true);
+  const made = s.activeIndex;
+  await page.keyboard.press(P); await page.keyboard.press(P);
+  s = await st(page, true);
+  ok(s.activeIndex !== made && !/2 回押した/.test(await page.$eval('#status', (e) => e.textContent)), L + ' Ctrl+a Ctrl+a runs last-window (bind C-a last-window), not send-prefix');
+  await page.keyboard.press(P); await page.keyboard.press('Tab');
+  ok((await st(page, true)).activeIndex === made && !/l は直前/.test(await page.$eval('#status', (e) => e.textContent)), L + ' Tab goes back without the lecture about l');
+  // = is bound to select-layout tiled: nothing, said, no choose-buffer, no miss.
+  const m0 = (await st(page, true)).run.misses;
+  await page.keyboard.press(P); await page.keyboard.press('=');
+  s = await st(page, true);
+  ok(s.picker === null && /未対応/.test(await page.$eval('#status', (e) => e.textContent)) && s.run.misses === m0, L + ' = does nothing but say it is unsupported (no choose-buffer, no miss)');
+  // choose-tree -w shows the windows under the session.
+  await page.keyboard.press(P); await page.keyboard.press('Control+w');
+  const rows = await page.$$eval('#term .picker-row', (e) => e.map((x) => x.textContent));
+  ok(rows.length === s.windows.length + 1 && /─→/.test(rows[1]), L + ' Ctrl+w (choose-tree -w) lists the ' + s.windows.length + ' windows under the session (' + rows.join(' / ') + ')');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press(P); await page.keyboard.press('Control+s');
+  ok((await page.$$eval('#term .picker-row', (e) => e.length)) === 1, L + ' Ctrl+s (choose-tree -s) shows the session folded');
+  await page.keyboard.press('Escape');
+  // Opening a list, the clock and the display-panes numbers are not misses.
+  await page.keyboard.press(P); await page.keyboard.press('t');
+  await page.keyboard.press(P); await page.keyboard.press('q'); await page.keyboard.press('1');
+  ok((await st(page, true)).run.misses === m0, L + ' clock-mode, the list and display-panes cost nothing');
+  // The copy questions by the guide, in the expert's keys.
+  const seenKeys = new Set();
+  let copyQ = 0, yankQ = false;
+  for (let guard = 0; guard < 200; guard++) {
+    s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    if (/^(copy_|yank_)/.test(s.run.type)) {
+      copyQ++;
+      if (s.run.type === 'yank_paste') yankQ = true;
+      for (let k = 0; k < 20 && (await st(page)).run.i === s.run.i; k++) {
+        const now = await st(page);
+        if (now.run.next && now.copyMode) seenKeys.add(now.run.next.keys[0]);
+        await followGuide(page, P);
+      }
+    } else await followGuide(page, P);
+  }
+  await waitResult(page, L);
+  const r = (await st(page)).result;
+  ok(copyQ >= 3 && yankQ, L + ' the run had its copy questions (' + copyQ + ', yank_paste among them)');
+  ok(r.misses === 0, L + ' the guide in these keys makes no miss (' + r.misses + ')');
+  ok(seenKeys.has('v') && seenKeys.has('y') && !seenKeys.has('Space') && !seenKeys.has('Enter'), L + ' the copy guide says v and y, never Space or Enter (' + [...seenKeys].join(' ') + ')');
+  ok(![...seenKeys].some((k) => /emacs/.test(k)), L + ' with mode-keys vi the emacs keys are not mentioned');
+  // By hand: v, End, y copies and leaves copy mode; Escape leaves too.
+  await page.click('#result-body [data-title]');
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  await page.keyboard.type('echo kakejiku'); await page.keyboard.press('Enter');
+  await page.keyboard.press(P); await page.keyboard.press('Enter');
+  ok((await st(page, true)).copyMode, L + ' Enter (bind Enter copy-mode) enters copy mode');
+  await page.keyboard.press('ArrowUp'); await page.keyboard.press('Home'); await page.keyboard.press('v');
+  ok((await st(page, true)).copyAt.sel !== null, L + ' v begins the selection');
+  await page.keyboard.press('End'); await page.keyboard.press('y');
+  s = await st(page, true);
+  ok(!s.copyMode && /kakejiku/.test(s.clipboard || ''), L + ' y copies and leaves copy mode (' + JSON.stringify(s.clipboard) + ')');
+  await page.keyboard.press(P); await page.keyboard.press('Enter'); await page.keyboard.press('Escape');
+  ok(!(await st(page, true)).copyMode, L + ' Escape (bound to cancel) leaves copy mode');
+  // The : prompt knows the aliases.
+  await page.keyboard.press(P); await page.keyboard.press('|');
+  const n0 = (await st(page, true)).panes.length;
+  const cmd = async (line) => { await page.keyboard.press(P); await page.keyboard.press(':'); await page.keyboard.type(line); await page.keyboard.press('Enter'); return st(page, true); };
+  const a0 = (await st(page, true)).activePane;
+  s = await cmd('selectp -L');
+  ok(s.activePane !== a0, L + ' :selectp -L moves to the left pane');
+  s = await cmd('lastp');
+  ok(s.activePane === a0, L + ' :lastp goes back');
+  s = await cmd('resizep -L 10');
+  ok(s.panes.length === n0 && !/unknown/.test(await page.$eval('#status', (e) => e.textContent)), L + ' :resizep -L 10 is known');
+  s = await cmd('swapp -U');
+  ok(!/unknown/.test(await page.$eval('#status', (e) => e.textContent)), L + ' :swapp -U is known');
+  s = await cmd('new -s logs');
+  s = await cmd('kill-session -t logs');
+  ok(s.sessions.length === 1 && s.session === 'dojo', L + ' :kill-session -t logs removes it (' + s.sessions.join(',') + ')');
+  s = await cmd('frobnicate');
+  ok(/unknown command: frobnicate/.test(await page.$eval('#status', (e) => e.textContent)), L + ' an unknown command is said as tmux says it');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+
+  // The copy questions in English, with nothing untranslated.
+  const ctxEn = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce', locale: 'en-US' });
+  const pageEn = await ctxEn.newPage();
+  const errorsEn = watch(pageEn);
+  const missing = new Set();
+  pageEn.on('console', (m) => { if (/\[i18n\]/.test(m.text())) missing.add(m.text()); });
+  await pageEn.goto(PAGE);
+  await pageEn.click('#conf-box summary');
+  await pageEn.fill('#conf-text', EXPERT_CONF);
+  await pageEn.click('#conf-apply');
+  const left = new Set();
+  const jp = () => pageEn.evaluate(() => {
+    const out = [];
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode());) {
+      const el = n.parentElement;
+      if (!el || el.closest('[hidden]') || el.closest('.lang-toggle') || el.closest('#conf-text') || !el.getClientRects().length) continue;
+      if (/[ぁ-んァ-ヶ一-龠]/.test(n.textContent)) out.push(n.textContent.trim().slice(0, 60));
+    }
+    return out;
+  });
+  for (const t of await jp()) left.add(t);
+  await pageEn.click('#course-list [data-course="hard"]');
+  await waitPlay(pageEn);
+  const enKeys = new Set();
+  for (let guard = 0; guard < 200; guard++) {
+    s = await st(pageEn);
+    if (!s.run || s.run.phase !== 'play') break;
+    if (/^(copy_|yank_)/.test(s.run.type)) { for (const t of await jp()) left.add(t); if (s.run.next && s.copyMode) enKeys.add(s.run.next.keys[0]); }
+    await followGuide(pageEn, P);
+  }
+  await waitResult(pageEn, L + ' (en)');
+  ok((await st(pageEn)).result.misses === 0 && enKeys.has('v') && enKeys.has('y'), L + ' (en) the guide in these keys makes no miss and says v and y');
+  ok(!left.size, L + ' (en) no Japanese on screen' + (left.size ? ': ' + [...left].join(' | ') : ''));
+  ok(!missing.size, L + ' (en) every text has its English' + (missing.size ? ': ' + [...missing].join(' | ') : ''));
+  ok(errorsEn.length === 0, L + ' (en) no page errors' + (errorsEn.length ? ': ' + errorsEn.join(' | ') : ''));
+  await ctxEn.close();
 }
 
 // A solved question stays on screen under a 成 seal while its rooms finish
@@ -2201,9 +2372,10 @@ async function loop7(browser) {
   ok(/Ctrl\+b を 2 回押した。2 回目はシェルに入る/.test(await status()), L + ' the prefix pressed twice is said (' + (await status()).trim() + ')');
   await page.keyboard.press('Meta+b');
   ok(/Cmd ではなく Ctrl を押しながら b/.test(await status()), L + ' Cmd+b is said to be Ctrl+b (' + (await status()).trim() + ')');
-  // A wrong key's chip is gone when the next question comes.
-  await page.keyboard.press('Control+b'); await page.keyboard.press('w');
-  ok((await page.$$('#chips .chip.miss')).length === 1, L + ' the wrong key w puts up a miss chip');
+  // A wrong key's chip is gone when the next question comes. (w only opens
+  // the list now, which costs nothing; Y is bound to nothing.)
+  await page.keyboard.press('Control+b'); await page.keyboard.press('Y');
+  ok((await page.$$('#chips .chip.miss')).length === 1, L + ' the wrong key Y puts up a miss chip');
   let i0 = (await st(page)).run.i;
   for (let k = 0; k < 12 && (await st(page)).run.i === i0; k++) await followGuide(page, 'Control+b');
   ok((await st(page)).run.i === i0 + 1 && (await page.$$('#chips .chip.miss')).length === 0, L + ' the miss chip is taken down with the next question');
@@ -2724,6 +2896,7 @@ const parts = [
   ['clear', clearHold],
   ['navigator', navigator],
   ['ownconf', ownConf],
+  ['conffid', confFidelity],
   ['noconfirm', noConfirm],
   ['english', english],
   ['playtest', playtest],

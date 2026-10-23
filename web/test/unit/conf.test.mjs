@@ -101,21 +101,120 @@ test('vim-tmux-navigator: the keys the plugin binds by default', () => {
   assert.equal(c.skipped.length, 0, 'the TPM lines are understood');
 });
 
-test('everything else is listed with a reason, never dropped silently', () => {
+test('everything else is listed with a reason, never dropped silently: 未対応 apart from 関係ない', () => {
   const c = C.parse([
     'set -g mouse on',
     'set -g status-style bg=black',
-    'setw -g mode-keys vi',
     "set -g @plugin 'tmux-plugins/tmux-resurrect'",
-    'bind -T copy-mode-vi v send -X begin-selection',
-    'bind q clock-mode',
+    "set -g @resurrect-strategy-nvim 'session'",
+    'set -g renumber-windows on',
+    'bind -T popup q kill-pane',
     'if-shell "test -f ~/.local.conf" "source ~/.local.conf"',
+    'run "~/bin/something"',
     'bind Q kill-session'
   ].join('\n'));
   assert.equal(c.used.length, 0);
-  assert.equal(c.skipped.length, 8);
-  assert.ok(c.skipped.every((s) => s.why && s.no >= 1 && s.line));
-  assert.equal(c.custom, false, 'nothing taken: still the defaults');
+  // 関係ない: the look and the plugin's own option. 未対応: what tmux does and the game cannot.
+  assert.deepEqual(plain(c.skipped.map((s) => s.no)), [1, 2, 4]);
+  assert.deepEqual(plain(c.unsupported.map((s) => s.no)), [3, 5, 6, 7, 8, 9]);
+  assert.ok(c.skipped.concat(c.unsupported).every((s) => s.why && s.no >= 1 && s.line));
+  assert.equal(c.custom, true, 'Q is taken (dead), so the file counts');
+  assert.equal(C.parse('set -g mouse on').custom, false, 'nothing taken: still the defaults');
+});
+
+test('a key bound to something the game lacks does nothing: no fall-back to the default', () => {
+  const c = C.parse('bind = select-layout tiled\nbind -n M-s setw synchronize-panes\nbind S choose-tree -w');
+  const eq = C.lookup(c, 'prefix', ev('='));
+  assert.ok(eq && eq.act.none, '= is bound, to nothing the game can do');
+  assert.ok(C.overridden(c, ev('=')), 'so choose-buffer is gone from =');
+  assert.ok(C.lookup(c, 'root', ev('ß', { alt: true, code: 'KeyS' })).act.none);
+  assert.equal(C.lookup(c, 'prefix', ev('S', { shift: true })).act.key, 'w', 'choose-tree -w opens the tree with the windows');
+  assert.equal(c.unsupported.length, 2);
+  assert.ok(/select-layout/.test(c.unsupported[0].why));
+});
+
+test('the prefix key bound in the prefix table: last-window runs, send-prefix sends', () => {
+  const c = C.parse('set -g prefix C-a\nbind C-a send-prefix\nbind C-a last-window');
+  assert.equal(C.lookup(c, 'prefix', ev('a', { ctrl: true })).act.key, 'l', 'the later bind wins, as in tmux');
+  const d = C.parse('set -g prefix C-a\nbind C-a send-prefix');
+  assert.equal(C.lookup(d, 'prefix', ev('a', { ctrl: true })).act.run, 'send-prefix');
+  assert.equal(C.lookup(C.parse('set -g prefix C-a'), 'prefix', ev('a', { ctrl: true })), null, 'nothing bound: the game falls back to send-prefix');
+});
+
+test('copy-mode tables: the player\'s keys for begin, copy, cancel and the moves; mode-keys picks the table', () => {
+  const c = C.parse([
+    'setw -g mode-keys vi',
+    'bind -T copy-mode-vi v send-keys -X begin-selection',
+    'bind -T copy-mode-vi V send -X select-line',
+    'bind -T copy-mode-vi C-v send-keys -X rectangle-toggle',
+    'bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel "pbcopy"',
+    'bind -T copy-mode-vi Y send -X copy-pipe "pbcopy"',
+    'bind -T copy-mode-vi Escape send-keys -X cancel',
+    'bind -T copy-mode-vi H send -X start-of-line',
+    'bind -T copy-mode-vi K send -X top-line',
+    'bind -T copy-mode M-w send -X copy-selection-and-cancel',
+    'bind -t vi-copy u halfpage-up'
+  ].join('\n'));
+  assert.equal(c.modeKeys, 'vi');
+  assert.ok(c.used.some((u) => /vi 式/.test(u.say)), 'mode-keys is a used line, not 見た目');
+  assert.equal(C.copyLookup(c, ev('v')).act.copy, 'begin-selection');
+  assert.equal(C.copyLookup(c, ev('y')).act.copy, 'copy-pipe-and-cancel');
+  assert.equal(C.copyLookup(c, ev('Y', { shift: true })).act.copy, 'copy-pipe');
+  assert.equal(C.copyLookup(c, ev('Escape')).act.copy, 'cancel');
+  assert.equal(C.copyLookup(c, ev('H', { shift: true })).act.copy, 'start-of-line');
+  assert.equal(C.copyLookup(c, ev('u')).act.copy, 'halfpage-up', 'the old -t vi-copy form is read');
+  assert.ok(C.copyLookup(c, ev('K', { shift: true })).act.none, 'top-line: the key is taken, dead');
+  assert.equal(C.copyLookup(c, ev('w', { alt: true, code: 'KeyW' })), null, 'the emacs table is not in use with mode-keys vi');
+  assert.equal(C.copyKey(c, ['begin-selection']), 'v');
+  assert.equal(C.copyKey(c, ['copy-pipe-and-cancel', 'copy-selection-and-cancel']), 'y');
+  assert.equal(C.copyKey(c, ['history-top']), null);
+  assert.equal(c.unsupported.length, 1);
+  assert.ok(/top-line/.test(c.unsupported[0].why));
+  // No mode-keys: both tables count.
+  const both = C.parse('bind -T copy-mode M-w send -X copy-selection-and-cancel\nbind -T copy-mode-vi v send -X begin-selection');
+  assert.equal(both.modeKeys, null);
+  assert.equal(C.copyLookup(both, ev('w', { alt: true, code: 'KeyW' })).act.copy, 'copy-selection-and-cancel');
+  assert.equal(C.copyLookup(both, ev('v')).act.copy, 'begin-selection');
+  const em = C.parse('set -g mode-keys emacs');
+  assert.equal(em.modeKeys, 'emacs');
+  assert.equal(C.parse('set -g mode-keys foo').unsupported.length, 1);
+});
+
+test('status-position, and the aliases of the commands the game has', () => {
+  const c = C.parse([
+    'set -g status-position top',
+    'bind a lastp',
+    'bind b selectp -R',
+    'bind c neww',
+    'bind d killp',
+    'bind e swapp -U',
+    'bind f resizep -L 5',
+    'bind g last',
+    'bind h rotatew',
+    'bind i prev',
+    'bind j lsk',
+    'bind k clock-mode',
+    'bind l display "hello"',
+    'bind m choose-window'
+  ].join('\n'));
+  assert.equal(c.statusTop, true);
+  assert.equal(c.unsupported.length, 0, JSON.stringify(c.unsupported));
+  assert.equal(c.skipped.length, 0);
+  const act = (k) => plain(C.lookup(c, 'prefix', ev(k)).act);
+  assert.equal(act('a').key, ';');
+  assert.equal(act('b').key, 'ArrowRight');
+  assert.equal(act('c').key, 'c');
+  assert.equal(act('d').key, 'x');
+  assert.equal(act('e').key, '{');
+  assert.deepEqual([act('f').resize, act('f').n], ['L', 5]);
+  assert.equal(act('g').key, 'l');
+  assert.deepEqual([act('h').key, act('h').ctrl], ['o', true]);
+  assert.equal(act('i').key, 'p');
+  assert.equal(act('j').key, '?');
+  assert.equal(act('k').key, 't');
+  assert.deepEqual([act('l').run, act('l').text], ['say', 'hello']);
+  assert.equal(act('m').key, 'w');
+  assert.equal(C.parse('set -g status-position bottom').statusTop, false);
 });
 
 test('base-index and pane-base-index are taken; the keys the tips name are understood', () => {
@@ -130,7 +229,7 @@ test('base-index and pane-base-index are taken; the keys the tips name are under
   assert.equal(C.lookup(c, 'prefix', ev('PageUp')).act.key, 'PageUp');
   assert.equal(C.lookup(c, 'prefix', ev('b')).act.key, '=');
   assert.equal(C.parse('set -g base-index 1').custom, true, 'a base-index alone is a setting of its own');
-  assert.equal(C.parse('set -g base-index x').skipped.length, 1, 'an unreadable number is listed');
+  assert.equal(C.parse('set -g base-index x').unsupported.length, 1, 'an unreadable number is listed');
 });
 
 test('a later bind of the same key wins; long lines join with a backslash', () => {
