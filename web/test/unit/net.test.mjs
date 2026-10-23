@@ -108,3 +108,13 @@ test('forget drops the 合言葉 and the name', async () => {
   assert.equal(ADV.net.state().key, null);
   assert.equal(ADV.net.state().name, null);
 });
+
+test('state: a broken store is as if unset (round 11)', () => {
+  for (const raw of ['"str"', '[]', '0', '{{{', JSON.stringify({ key: 123, name: { a: 1 }, syncedAt: 12, vid: 5, boards: false })]) {
+    const ADV = device(fakeServer(), memoryStorage({ 'tmux-da-net': raw }));
+    const st = ADV.net.state();
+    assert.ok(st.key == null && st.name == null && st.syncedAt == null && st.vid == null, raw);
+  }
+  const ADV = device(fakeServer(), memoryStorage({ 'tmux-da-net': JSON.stringify({ boards: false }) }));
+  assert.equal(ADV.net.state().boards, false, 'a flag is kept');
+});
