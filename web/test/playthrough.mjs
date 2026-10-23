@@ -551,8 +551,19 @@ async function english(browser) {
     }
     return out;
   });
-  const left = new Set();
-  const look = async () => { for (const t of await japanese()) left.add(t); };
+  const left = new Set(), dots = new Set();
+  // The Japanese ・ between words is not English: it is " · " there.
+  const middleDots = () => page.evaluate(() => {
+    const out = [];
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode());) {
+      const el = n.parentElement;
+      if (!el || el.closest('[hidden]') || !el.getClientRects().length) continue;
+      if (/・/.test(n.textContent)) out.push(n.textContent.trim().slice(0, 60));
+    }
+    return out;
+  });
+  const look = async () => { for (const t of await japanese()) left.add(t); for (const t of await middleDots()) dots.add(t); };
   await page.goto(PAGE);
   ok(await page.evaluate(() => document.documentElement.lang) === 'en', L + ' an English browser gets the English page');
   ok(/Start/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' the title says Start');
@@ -568,15 +579,21 @@ async function english(browser) {
   await waitResult(page, L);
   ok((await st(page)).result.misses === 0, L + ' the English guide leads to no wrong key');
   const share = await page.$eval('#result-body .share-text', (e) => e.textContent);
-  ok(/^tmux Dojo \d+\/\d+ Beginner [\d.]+s \(par 45s\) \S+/.test(share) && (share.match(/[🟩🟨🟥]/gu) || []).length === 15 && /tmux-dojo\/\?lang=en$/.test(share),
-    L + ' the result to share: time against par, the rank, a square per question, the link (' + share.replace(/\n/g, ' / ') + ')');
+  ok(/^tmux Dojo [A-Z][a-z]{2} \d+ · Beginner · [\d.]+s \(par 45s\) · \S+/.test(share) && (share.match(/[🟩🟨🟥]/gu) || []).length === 15 && /tmux-dojo\/\?lang=en$/.test(share),
+    L + ' the result to share: the day as Oct 23, time against par, the title, a square per question, the link (' + share.replace(/\n/g, ' / ') + ')');
+  const facts = await page.$eval('#result-body .em-facts', (e) => e.textContent);
+  ok(/Elapsed/.test(facts) && /last 1 run:/.test(await page.$eval('#result-body .sk-note', (e) => e.textContent)), L + ' one run is "1 run", not "1 runs"');
   await look();
   await page.click('#result-body [data-title]');
+  ok(/^1 run in all$/.test(await page.$eval('#records-sub', (e) => e.textContent.trim())), L + ' the title counts "1 run in all"');
   await page.click('#btn-records');
   await look();
+  const ranks = await page.$eval('#records-body .rec-ranks', (e) => e.textContent);
+  ok(/Apprentice/.test(ranks) && !/Beginner\s+over/.test(ranks) && /1st dan/.test(ranks), L + ' the lowest title is Apprentice (not the Beginner course) and the titles are glossed');
   await page.click('[data-rec-tab="sync"]');
   await look();
   ok(!left.size, L + ' no Japanese on screen' + (left.size ? ': ' + [...left].join(' | ') : ''));
+  ok(!dots.size, L + ' no Japanese middle dot in the English' + (dots.size ? ': ' + [...dots].join(' | ') : ''));
   ok(!missing.size, L + ' every text has its English' + (missing.size ? ': ' + [...missing].join(' | ') : ''));
   // The switch: to Japanese, and it stays.
   await page.click('.lang-toggle');
