@@ -4,6 +4,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import { makeD1 } from './d1.mjs';
+import { dailyOrder, jstDay } from '../src/rules.js';
 
 let env, ip = 0;
 beforeEach(() => { env = { DB: makeD1() }; });
@@ -17,10 +18,10 @@ async function call(method, path, body, opts = {}) {
   return { status: res.status, body: res.status === 204 ? null : await res.json(), headers: res.headers };
 }
 
-const human = (id, course, s, misses = 0) => {
-  const n = { easy: 15, normal: 20, hard: 16 }[course];
-  const qs = Array.from({ length: n }, (_, i) => ({ t: 'split_lr', s, m: i === 0 ? misses : 0 }));
-  return { id, course, ver: 2, at: new Date().toISOString(), time: +(n * s + 2 * misses).toFixed(2), misses, qs };
+const human = (id, course, s, misses = 0, extra = {}) => {
+  const qs = dailyOrder(course, jstDay(new Date())).map((t, i) => ({ t, s, m: i === 0 ? misses : 0 }));
+  const n = qs.length;
+  return { id, course, ver: 2, at: new Date().toISOString(), time: +(n * s + 2 * misses).toFixed(2), misses, qs, ...extra };
 };
 
 async function player(name) {
@@ -72,6 +73,9 @@ test('names: unique, at most 12 characters, changeable by their owner', async ()
   assert.equal((await call('POST', '/v1/name', { key: b, name: 'たまご' })).status, 409);
   assert.equal((await call('POST', '/v1/name', { key: b, name: 'x'.repeat(13) })).status, 400);
   assert.equal((await call('POST', '/v1/name', { key: b, name: '<b>' })).status, 400);
+  assert.equal((await call('POST', '/v1/name', { key: b, name: 'たまご\u200b' })).status, 409, 'a zero-width space does not make a second たまご');
+  assert.equal((await call('POST', '/v1/name', { key: b, name: '\u200b\u200b' })).status, 400, 'an invisible name');
+  assert.equal((await call('POST', '/v1/name', { key: b, name: 'a\u0301\u0301\u0301\u0301' })).status, 400, 'piled-up accents');
   assert.equal((await call('POST', '/v1/name', { key: b, name: '  ひよこ  ' })).body.name, 'ひよこ');
   assert.equal((await call('POST', '/v1/name', { key: a, name: 'にわとり' })).status, 200);
   assert.equal((await call('POST', '/v1/name', { key: b, name: 'たまご' })).status, 200, 'a freed name can be taken');
@@ -84,9 +88,27 @@ test('scores: need a name, and must be humanly possible', async () => {
   assert.equal((await call('POST', '/v1/scores', { key, run: human('r_2', 'easy', 0.1) })).status, 400);
   const bad = human('r_3', 'easy', 2); bad.time = 5;
   assert.equal((await call('POST', '/v1/scores', { key, run: bad })).status, 400);
+  const wrongOrder = human('r_5', 'easy', 2); wrongOrder.qs.reverse();
+  assert.equal((await call('POST', '/v1/scores', { key, run: wrongOrder })).status, 400, 'not today\'s order');
   const ok = await call('POST', '/v1/scores', { key, run: human('r_4', 'easy', 2, 1) });
   assert.equal(ok.status, 200);
   assert.deepEqual([ok.body.rank, ok.body.total], [1, 1]);
+});
+
+test('scores: a run on the player\'s own keys is on the board, marked', async () => {
+  const own = await player('ねこ'), def = await player('いぬ');
+  assert.equal((await call('POST', '/v1/scores', { key: own, run: human('o1', 'easy', 1, 0, { conf: 1, prefix: 'Ctrl+a' }) })).status, 200);
+  assert.equal((await call('POST', '/v1/scores', { key: def, run: human('d1', 'easy', 1.2) })).status, 200);
+  const rows = (await call('GET', '/v1/board?course=easy&span=today')).body.rows;
+  assert.deepEqual(rows.map((r) => [r.name, r.own]), [['ねこ', 1], ['いぬ', 0]]);
+  assert.equal((await call('GET', '/v1/ghost?course=easy&span=today')).body.ghost.own, 1);
+});
+
+test('scores: a database from before the own column gets it on first use', async () => {
+  env.DB.raw.exec('DROP TABLE scores; CREATE TABLE scores (run_id TEXT NOT NULL, key_hash TEXT NOT NULL, course TEXT NOT NULL, ver INTEGER NOT NULL, time REAL NOT NULL, day TEXT NOT NULL, at TEXT NOT NULL, splits TEXT NOT NULL, PRIMARY KEY (key_hash, run_id))');
+  const key = await player('むかし');
+  assert.equal((await call('POST', '/v1/scores', { key, run: human('m1', 'easy', 1) })).status, 200);
+  assert.deepEqual((await call('GET', '/v1/board?course=easy&span=today')).body.rows.map((r) => [r.name, r.own]), [['むかし', 0]]);
 });
 
 test('boards: one row per player, their best, fastest first; spans filter by day', async () => {
@@ -123,6 +145,14 @@ test('rate limit: too many writes from one address in a minute', async () => {
   for (let i = 0; i < 7; i++) statuses.push((await call('POST', '/v1/keys', undefined, { ip: '192.0.2.1' })).status);
   assert.deepEqual(statuses.slice(0, 5), [200, 200, 200, 200, 200]);
   assert.equal(statuses[6], 429);
+});
+
+test('rate limit: at most 40 new 合言葉 a day from one address', async () => {
+  const minute = Math.floor(Date.now() / 60000);
+  env.DB.raw.prepare('INSERT INTO hits (ip, minute, n) VALUES (?, ?, 40)').run('192.0.2.2:keys:day', (Math.floor(minute / 1440) + 1) * 1440);
+  assert.equal((await call('POST', '/v1/keys', undefined, { ip: '192.0.2.2' })).status, 429);
+  assert.equal((await call('POST', '/v1/keys', undefined, { ip: '192.0.2.3' })).status, 200, 'another address is fine');
+  assert.equal((await call('POST', '/v1/sync', { key: 'nope-nope-nope-000', runs: [] }, { ip: '192.0.2.2' })).status, 404, 'only new 合言葉 are capped by day');
 });
 
 test('unknown paths and bodies', async () => {
