@@ -30,12 +30,51 @@ test('add: delta from the last run and 五回平均 after five runs', () => {
   assert.equal(REC.add(run(40)).ao5Prev, 46);
 });
 
-test('add: rank and the rank going up', () => {
+test('add: rank, and 昇格 only when the house\'s highest title rises', () => {
   const REC = fresh();
-  REC.add(run(135)); // 9.0 s per question: 見習い
+  const first = REC.add(run(135)); // 9.0 s per question: 白帯
+  assert.equal(first.rank, '白帯');
+  assert.equal(first.rankUp, false, 'the first run is the starting point, not a 昇格');
   const s = REC.add(run(45)); // 3.0
   assert.equal(s.rank, '師範代');
+  assert.equal(s.rankFrom, '白帯');
   assert.equal(s.rankUp, true);
+  const again = REC.add(run(60)); // 4.0: 黒帯, below the 師範代 already held
+  assert.equal(again.rank, '黒帯');
+  assert.equal(again.rankFrom, '師範代');
+  assert.equal(again.rankUp, false);
+  assert.equal(REC.bestTitle('easy'), '師範代', 'the title reached never goes down');
+  assert.equal(REC.stats('easy').bestRank, '師範代');
+});
+
+test('免状: the first day each title was reached on each house, the belts below included', () => {
+  const REC = fresh();
+  REC.add(run(90, { at: '2026-10-01T03:00:00Z' })); // 6.0: 茶帯
+  REC.add(run(60, { at: '2026-10-03T03:00:00Z' })); // 4.0: 黒帯
+  REC.add(run(100, { at: '2026-10-04T03:00:00Z' })); // slower: nothing new
+  REC.add({ ...run(44), course: 'hard', n: 16, at: '2026-10-05T03:00:00Z' }); // 2.75 / 1.6 = 1.72 秒: 達人
+  REC.add({ ...run(18), course: 'keiko', n: 9, qs: [], at: '2026-10-06T03:00:00Z' }); // practice: no 免状
+  const m = plain(REC.menjo());
+  assert.deepEqual(m.filter((x) => x.course === 'easy').map((x) => [x.title, x.day]), [['黒帯', '2026-10-03'], ['茶帯', '2026-10-01'], ['緑帯', '2026-10-01'], ['白帯', '2026-10-01']]);
+  assert.deepEqual(m.filter((x) => x.course === 'hard').map((x) => x.title), ['達人', '師範', '師範代', '黒帯', '茶帯', '緑帯', '白帯']);
+  assert.ok(!m.some((x) => x.course === 'keiko'));
+  assert.equal(m[0].day, '2026-10-05', 'newest first');
+  assert.equal(REC.bestTitle('hard'), '達人');
+  assert.equal(REC.bestTitle('normal'), null);
+});
+
+test('免状 survive the pruning of old runs and go with 記録を消す', () => {
+  const runs = [];
+  for (let i = 0; i < 150; i++) runs.push({ id: 'r' + i, course: 'easy', ver: 2, at: '2026-02-0' + (1 + (i % 9)) + 'T00:00:00Z', time: 60 + i * 0.1, misses: 0, n: 15, rank: '黒帯', rec: i < 5, qs: [] });
+  runs[0].time = 40; runs[0].rank = '師範代'; // the first run, the only 師範代, is pruned
+  const REC = fresh({ 'tmux-da': JSON.stringify({ schema: 4, arena: {}, runs }) });
+  assert.equal(REC.bestTitle('easy'), '師範代');
+  REC.add(run(70));
+  assert.ok(REC.runsOf('easy').length <= REC.CAP + 1);
+  assert.equal(REC.bestTitle('easy'), '師範代', 'kept apart from the runs');
+  REC.clearArena();
+  assert.equal(REC.bestTitle('easy'), null);
+  assert.deepEqual(plain(REC.menjo()), []);
 });
 
 test('migrate: schema 2 rank titles become the new ones', () => {
@@ -44,11 +83,34 @@ test('migrate: schema 2 rank titles become the new ones', () => {
   assert.equal(REC.load().schema, REC.SCHEMA);
 });
 
-test('migrate: schema 3 house titles become the dojo ones, and so do merged runs', () => {
+test('migrate: schema 3 house titles become belts, and so do merged runs', () => {
   const REC = fresh({ 'tmux-da': JSON.stringify({ schema: 3, arena: {}, runs: [{ id: 'r_1', course: 'easy', time: 30, rank: '屋敷守', at: '2026-01-01T00:00:00Z', qs: [] }] }) });
-  assert.equal(REC.runsOf('easy')[0].rank, '三段');
+  assert.equal(REC.runsOf('easy')[0].rank, '黒帯');
   REC.merge([{ id: 'r_2', course: 'easy', time: 20, rank: 'からくり師', at: '2026-01-02T00:00:00Z', qs: [] }]);
   assert.equal(REC.runsOf('easy')[0].rank, '師範代');
+});
+
+test('migrate: the dan grades become belts, never lower, and faster runs get what their pace earns now', () => {
+  const runs = [
+    { id: 'a', course: 'easy', time: 100, n: 15, rank: '初段', at: '2026-03-01T00:00:00Z', qs: [] }, // 6.7 秒: 初段 → 緑帯, as the pace says
+    { id: 'b', course: 'easy', time: 72, n: 15, rank: '三段', at: '2026-03-02T00:00:00Z', qs: [] }, // 4.8 秒: 三段 → 黒帯 (pace alone would say 茶帯)
+    { id: 'c', course: 'easy', time: 44, n: 15, rank: '師範代', at: '2026-03-03T00:00:00Z', qs: [] }, // 2.9 秒: 師範代 stays
+    { id: 'd', course: 'easy', time: 30, rank: '師範', at: '2026-03-04T00:00:00Z', qs: [] }, // no n: the name alone
+    { id: 'e', course: 'hard', time: 64, n: 16, rank: '見習い', at: '2026-03-05T00:00:00Z', qs: [] } // 4 / 1.6 = 2.5 秒: 師範 by pace
+  ];
+  const REC = fresh({ 'tmux-da': JSON.stringify({ schema: 4, arena: {}, runs }) });
+  assert.deepEqual(plain(REC.runsOf('easy').map((r) => r.rank)), ['師範', '師範代', '黒帯', '緑帯']);
+  assert.equal(REC.runsOf('hard')[0].rank, '師範');
+  assert.equal(REC.load().schema, 5);
+  // The 免状 come from the old runs: the player keeps every title reached, with its day.
+  const m = plain(REC.menjo());
+  assert.deepEqual(m.filter((x) => x.course === 'easy' && ['師範', '黒帯', '茶帯', '白帯'].includes(x.title)).map((x) => [x.title, x.day]),
+    [['師範', '2026-03-04'], ['黒帯', '2026-03-02'], ['茶帯', '2026-03-02'], ['白帯', '2026-03-01']]);
+  assert.equal(REC.bestTitle('easy'), '師範');
+  // Merged runs from another device bring their titles and days too.
+  REC.merge([{ id: 'f', course: 'normal', time: 20, n: 20, rank: '初段', at: '2026-02-01T00:00:00Z', qs: [] }]); // 1.0 / 1.25: 名人
+  assert.equal(REC.bestTitle('normal'), '名人');
+  assert.equal(plain(REC.menjo()).filter((x) => x.course === 'normal' && x.title === '白帯')[0].day, '2026-02-01');
 });
 
 test('migrate: a schema 1 best time becomes one legacy run', () => {
@@ -247,7 +309,7 @@ test('dailyBest: one point per day (Japan time), the best of the day', () => {
 test('the 稽古の間 is a course for records (rank, par) with its own question count', () => {
   const REC = fresh();
   const s = REC.add({ ...run(18), course: 'keiko', n: 9, qs: [] });
-  assert.equal(s.par, 35);
+  assert.equal(s.par, 41, '3.5 秒 × 1.3 × 9 問');
   assert.equal(REC.courseOf('keiko').practice, true);
 });
 

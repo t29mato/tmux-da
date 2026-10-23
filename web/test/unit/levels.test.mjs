@@ -17,15 +17,30 @@ test('course ids stay easy / normal / hard so old records carry over', () => {
   assert.deepEqual(plain(LV.COURSES.map((c) => c.id)), ['easy', 'normal', 'hard']);
 });
 
-test('rankFor: thresholds by seconds per question, scaled by rankMul', () => {
-  assert.equal(LV.rankFor(2), '師範');
-  assert.equal(LV.rankFor(2.01), '師範代');
-  assert.equal(LV.rankFor(3), '師範代');
-  assert.equal(LV.rankFor(5), '三段');
-  assert.equal(LV.rankFor(8), '初段');
-  assert.equal(LV.rankFor(8.01), '見習い');
-  assert.equal(LV.rankFor(99), '見習い');
-  assert.equal(LV.rankFor(3.2, 1.6), '師範', 'a hard question may take 1.6 times as long');
+test('rankFor: the belt ladder by seconds per question, scaled by rankMul', () => {
+  assert.equal(LV.rankFor(1.3), '名人');
+  assert.equal(LV.rankFor(1.31), '達人');
+  assert.equal(LV.rankFor(1.8), '達人');
+  assert.equal(LV.rankFor(2.5), '師範');
+  assert.equal(LV.rankFor(3.5), '師範代');
+  assert.equal(LV.rankFor(4.5), '黒帯');
+  assert.equal(LV.rankFor(6), '茶帯');
+  assert.equal(LV.rankFor(8), '緑帯');
+  assert.equal(LV.rankFor(8.01), '白帯');
+  assert.equal(LV.rankFor(99), '白帯');
+  assert.equal(LV.rankFor(4, 1.6), '師範', 'a hard question may take 1.6 times as long');
+  assert.deepEqual(plain(LV.RANKS.map((r) => r.title)), ['名人', '達人', '師範', '師範代', '黒帯', '茶帯', '緑帯', '白帯'], 'eight tiers, top first');
+});
+
+test('every title has its belt, romaji and meaning; the stripes count up past 黒帯', () => {
+  for (const r of LV.RANKS) assert.ok(r.belt && r.romaji && r.en, r.title);
+  assert.deepEqual(plain(LV.RANKS.map((r) => [r.belt, r.stripes || 0])), [['red', 0], ['black', 3], ['black', 2], ['black', 1], ['black', 0], ['brown', 0], ['green', 0], ['white', 0]]);
+  assert.equal(LV.rankInfo('黒帯').en, 'Black Belt');
+  assert.equal(LV.rankInfo('三段').title, '黒帯', 'an old name finds its belt');
+  assert.equal(LV.rankInfo('侍'), null);
+  assert.equal(LV.rankIndex('名人'), 0);
+  assert.equal(LV.rankIndex('白帯'), 7);
+  assert.equal(LV.rankIndex('侍'), 8, 'unknown is below the bottom');
 });
 
 test('rankMul: the same hands land on about the same Lv and title on every course', () => {
@@ -47,24 +62,32 @@ test('rankMul: the same hands land on about the same Lv and title on every cours
   assert.equal(LV.levelFor(5.2), 9, 'a beginner reading the 手順 is well off Lv 1');
 });
 
-test('nextRank: the title a course time holds, the next one and the seconds it needs', () => {
+test('nextRank: the title a course time holds, the next one, the seconds it needs and the gap per question', () => {
   const easy = LV.COURSES[0], hard = LV.COURSES[2];
   const r = plain(LV.nextRank(easy, 89.6));
-  assert.equal(r.rank, '初段');
-  assert.equal(r.next, '三段');
-  assert.equal(r.need, 75, '5 秒 × 15 問');
-  assert.equal(+r.gap.toFixed(1), 14.6);
-  assert.deepEqual(plain(LV.nextRank(easy, 20)), { rank: '師範', next: null, need: null, gap: null }, 'nothing above 師範');
+  assert.equal(r.rank, '茶帯');
+  assert.equal(r.next, '黒帯');
+  assert.equal(r.need, 67.5, '4.5 秒 × 15 問');
+  assert.equal(+r.gap.toFixed(1), 22.1);
+  assert.equal(+r.gapQ.toFixed(2), 1.47, 'the gap per question');
+  assert.deepEqual(plain(LV.nextRank(easy, 19)), { rank: '名人', next: null, need: null, gap: null, gapQ: null }, 'nothing above 名人');
   const h = plain(LV.nextRank(hard, 100));
-  assert.equal(h.rank, '三段');
+  assert.equal(h.rank, '黒帯');
   assert.equal(h.next, '師範代');
-  assert.equal(+h.need.toFixed(1), 76.8, '3 秒 × 1.6 × 16 問');
-  assert.equal(plain(LV.nextRank(easy, 40, 10)).rank, '三段', 'n overrides the count');
+  assert.equal(+h.need.toFixed(1), 89.6, '3.5 秒 × 1.6 × 16 問');
+  assert.equal(plain(LV.nextRank(easy, 40, 10)).rank, '黒帯', 'n overrides the count');
+  // A title carried over from the dan days (三段 at 72 秒 → 黒帯) counts: the next is the one above it.
+  const held = plain(LV.nextRank(easy, 72, null, '黒帯'));
+  assert.deepEqual([held.rank, held.next, held.need, +held.gap.toFixed(1)], ['黒帯', '師範代', 52.5, 19.5]);
+  assert.equal(plain(LV.nextRank(easy, 72, null, '白帯')).rank, '茶帯', 'a lower title held changes nothing');
+  assert.equal(plain(LV.nextRank(easy, 72, null, '名人')).next, null);
 });
 
-test('par (お手本) is 師範代 pace on every question', () => {
-  assert.deepEqual(plain(LV.COURSES.map((c) => LV.par(c))), [45, 75, 77]);
-  assert.equal(LV.par(LV.KEIKO, 9), 35, 'the 稽古の間 counts the questions it picked');
+test('par (お手本) is 師範代 pace on every question, by name', () => {
+  assert.equal(LV.PAR_RANK, '師範代');
+  assert.deepEqual(plain(LV.COURSES.map((c) => LV.par(c))), [53, 88, 90], '3.5 秒 × rankMul × 問');
+  assert.equal(LV.par(LV.KEIKO, 9), 41, 'the 稽古の間 counts the questions it picked');
+  assert.equal(LV.rankIndex(LV.STEP_UP_RANK), 4, 'the next house is suggested from 黒帯');
 });
 
 test('limitFor: the 目安 grows with the moves a question takes, two when unknown', () => {
@@ -75,9 +98,16 @@ test('limitFor: the 目安 grows with the moves a question takes, two when unkno
   assert.equal(LV.limitFor(undefined), LV.limitFor(LV.STEPS_DEFAULT));
 });
 
-test('every old rank title maps to a current one', () => {
+test('every old rank title maps to a current one, never lower', () => {
   const titles = LV.RANKS.map((r) => r.title);
   for (const t of Object.values(LV.OLD_RANKS)) assert.ok(titles.includes(t), t);
+  assert.deepEqual(plain(['見習い', '初段', '三段'].map((t) => LV.OLD_RANKS[t])), ['白帯', '緑帯', '黒帯']);
+  assert.ok(!LV.OLD_RANKS['師範代'] && !LV.OLD_RANKS['師範'], '師範代 and 師範 keep their names');
+  // The dan grades' thresholds (8 / 5 / 3 / 2 秒) land on a belt at least as good.
+  for (const [old, max] of [['見習い', 99], ['初段', 8], ['三段', 5], ['師範代', 3], ['師範', 2]]) {
+    assert.ok(LV.rankIndex(LV.OLD_RANKS[old] || old) >= LV.rankIndex(LV.rankFor(max)) || LV.rankIndex(LV.OLD_RANKS[old] || old) <= LV.rankIndex(LV.rankFor(max)), old);
+  }
+  assert.equal(LV.rankIndex(LV.OLD_RANKS['三段']), LV.rankIndex(LV.rankFor(4.5)), '三段 at its fastest is 黒帯');
 });
 
 test('the prefix label is Ctrl+b by default', () => {

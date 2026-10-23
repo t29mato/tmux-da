@@ -545,7 +545,8 @@ async function english(browser) {
     const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n; (n = w.nextNode());) {
       const el = n.parentElement;
-      if (!el || el.closest('[hidden]') || el.closest('.lang-toggle') || !el.getClientRects().length) continue;
+      // The seal and the title in the share text keep their kanji on purpose, marked lang="ja".
+      if (!el || el.closest('[hidden]') || el.closest('.lang-toggle') || el.closest('[lang="ja"]') || !el.getClientRects().length) continue;
       if (getComputedStyle(el).visibility === 'hidden') continue;
       if (/[ぁ-んァ-ヶ一-龠]/.test(n.textContent)) out.push(n.textContent.trim().slice(0, 60));
     }
@@ -579,7 +580,7 @@ async function english(browser) {
   await waitResult(page, L);
   ok((await st(page)).result.misses === 0, L + ' the English guide leads to no wrong key');
   const share = await page.$eval('#result-body .share-text', (e) => e.textContent);
-  ok(/^tmux Dojo [A-Z][a-z]{2} \d+ · Beginner · [\d.]+s \(par 45s\) · \S+/.test(share) && (share.match(/[🟩🟨🟥]/gu) || []).length === 15 && /tmux-dojo\/\?lang=en$/.test(share),
+  ok(/^tmux Dojo [A-Z][a-z]{2} \d+ · Beginner · [\d.]+s \(par 53s\) · \S+ [一-龠]+\n/.test(share) && (share.match(/[🟩🟨🟥]/gu) || []).length === 15 && /tmux-dojo\/\?lang=en$/.test(share),
     L + ' the result to share: the day as Oct 23, time against par, the title, a square per question, the link (' + share.replace(/\n/g, ' / ') + ')');
   const facts = await page.$eval('#result-body .em-facts', (e) => e.textContent);
   ok(/Elapsed/.test(facts) && /last 1 run:/.test(await page.$eval('#result-body .sk-note', (e) => e.textContent)), L + ' one run is "1 run", not "1 runs"');
@@ -589,7 +590,7 @@ async function english(browser) {
   await page.click('#btn-records');
   await look();
   const ranks = await page.$eval('#records-body .rec-ranks', (e) => e.textContent);
-  ok(/Apprentice/.test(ranks) && !/Beginner\s+over/.test(ranks) && /1st dan/.test(ranks), L + ' the lowest title is Apprentice (not the Beginner course) and the titles are glossed');
+  ok(/Shiro-obi · White Belt/.test(ranks) && /Meijin · Grand Master/.test(ranks) && !/Beginner\s+over/.test(ranks), L + ' the ladder reads romaji · meaning, White Belt to Meijin');
   await page.click('[data-rec-tab="sync"]');
   await look();
   ok(!left.size, L + ' no Japanese on screen' + (left.size ? ': ' + [...left].join(' | ') : ''));
@@ -870,7 +871,7 @@ async function records(browser) {
   const modes = await page.$$eval('.wing-mode', (els) => els.map((e) => e.textContent));
   ok(modes.join('|') === '手ならし|腕試し|真剣勝負', L + ' the three modes are named (' + modes.join('|') + ')');
   ok(await page.$$eval('.wing-mode.rec', (els) => els.length === 1 && !!els[0].closest('[data-course="easy"]')), L + ' only 三間屋敷 is recommended');
-  ok(/お手本 45 秒/.test(await page.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' a course with no runs shows the お手本 time');
+  ok(/お手本 53 秒/.test(await page.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' a course with no runs shows the お手本 time');
   ok(/入門/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' はじめる starts with 入門 the first time');
   ok(await page.$eval('.wing[data-course="easy"]', (e) => e.classList.contains('hot')), L + ' 三間屋敷 is picked the first time');
 
@@ -885,7 +886,7 @@ async function records(browser) {
   ok(/出発点/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' first run says it is the starting point');
   let db = await page.evaluate(() => window.tmuxDa.records());
   const run = db.runs[0];
-  ok(db.schema === 4 && db.runs.length === 1 && run.id && run.at && run.rank && run.course === 'easy' && run.ver === 2, L + ' the run is stored with id, time, rank and ver 2');
+  ok(db.schema === 5 && db.runs.length === 1 && run.id && run.at && run.rank && run.course === 'easy' && run.ver === 2, L + ' the run is stored with id, time, rank and ver 2');
   ok(run.qs.length === 15 && run.qs.every((q) => typeof q.s === 'number' && q.s >= 0), L + ' every question has its seconds');
   ok(run.qs.some((q) => q.m >= 1), L + ' the deliberate miss is on its question');
 
@@ -904,8 +905,8 @@ async function records(browser) {
   ok((await st(page)).screen === 'records' && (await st(page)).recCourse === 'easy', L + ' 絵巻を開く opens the easy history');
   ok(await page.$$eval('#rec-chart .bar', (e) => e.length) === 2, L + ' the chart has a bar per run');
   ok(await page.$$eval('#rec-chart .bar.rec', (e) => e.length) >= 1, L + ' record runs are marked on the chart');
-  ok(await page.$$eval('.rec-panel:not(.rec-ranks) .rec-table tbody tr', (e) => e.length) === 2, L + ' the table lists both runs');
-  ok(await page.$$eval('.rec-ranks tbody tr', (e) => e.length) === 5, L + ' the list of titles has all five');
+  ok(await page.$$eval('.rec-panel:not(.rec-ranks):not(.rec-menjo) .rec-table tbody tr', (e) => e.length) === 2, L + ' the table lists both runs');
+  ok(await page.$$eval('.rec-ranks tbody tr', (e) => e.length) === 8, L + ' the list of titles has all eight');
   ok(await page.$$eval('.weak-list li', (e) => e.length) >= 1, L + ' two runs are enough for the weakness panel');
   await shot(page, 'records-desktop');
   await page.click('[data-rec-course="hard"]');
@@ -936,12 +937,12 @@ async function records(browser) {
   await p2.evaluate(() => localStorage.setItem('tmux-da', JSON.stringify({ prefix: 'C-b', level: 5, arena: { 'tmux:easy': { time: 30.5, misses: 1, date: '2026-01-01' } } })));
   await p2.reload();
   db = await p2.evaluate(() => window.tmuxDa.records());
-  ok(db.schema === 4 && db.runs.length === 1 && db.runs[0].legacy === true && db.runs[0].time === 30.5, L + ' an old best becomes a legacy run');
+  ok(db.schema === 5 && db.runs.length === 1 && db.runs[0].legacy === true && db.runs[0].time === 30.5, L + ' an old best becomes a legacy run');
   ok(/30\.5秒/.test(await p2.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' the old best shows on the house');
   await p2.evaluate(() => localStorage.setItem('tmux-da', JSON.stringify({ schema: 2, arena: { 'tmux:normal': { time: 50 } }, runs: [{ id: 'a', course: 'normal', ver: 1, at: '2026-02-01T00:00:00Z', time: 50, misses: 0, timeouts: 1, n: 20, rank: '勇者', rec: true, qs: [{ t: 'focus', s: null, m: 0, to: 1 }] }] })));
   await p2.reload();
   db = await p2.evaluate(() => window.tmuxDa.records());
-  ok(db.schema === 4 && db.runs[0].rank === '師範代', L + ' schema 2 runs get the new titles (勇者 → 師範代)');
+  ok(db.schema === 5 && db.runs[0].rank === '師範', L + ' schema 2 runs get the new titles (勇者 → 師範代, and 2.0 秒 a question is 師範 now)');
 
   // The cap, and the weakness ranking, through the module directly.
   const capped = await p2.evaluate(() => {
@@ -969,7 +970,7 @@ async function records(browser) {
   const sw = await p2.evaluate(() => document.documentElement.scrollWidth);
   ok(sw <= PHONE.width, L + ' no horizontal page scroll on a phone (' + sw + 'px)');
   await shot(p2, 'records-phone');
-  ok(await p2.evaluate(() => ADV.levels.rankFor(4.0, 1.6) === '師範代' && ADV.levels.rankFor(4.0) === '三段'), L + ' the hard house scales the rank thresholds');
+  ok(await p2.evaluate(() => ADV.levels.rankFor(4.0, 1.6) === '師範' && ADV.levels.rankFor(4.0) === '黒帯'), L + ' the hard house scales the rank thresholds');
   await ctx2.close();
 }
 
@@ -1084,7 +1085,7 @@ async function learning(browser) {
   });
   await page.reload();
   ok(/Lv\.\d+/.test(await page.$eval('#skill', (e) => e.textContent)), L + ' the title shows the 腕前: ' + (await page.$eval('#skill .sk-row', (e) => e.textContent)));
-  ok(/腕前 Lv\.\d+/.test(await page.$eval('#title-meta', (e) => e.textContent)), L + ' the top bar shows the 腕前');
+  ok(/いまの調子 Lv\.\d+/.test(await page.$eval('#title-meta', (e) => e.textContent)), L + ' the top bar shows the 腕前 as いまの調子');
   ok(await page.$eval('#btn-keiko', (e) => !e.hidden && /稽古/.test(e.textContent)), L + ' the title offers the 稽古');
   ok((await page.evaluate(() => ADV.records.weakTypes(3))).join() === 'resize', L + ' resize is the weak type');
   await shot(page, 'title-skill');
@@ -2355,7 +2356,7 @@ async function loop10(browser) {
   const seed = (times, daysAgo = 1) => {
     const qs = ['split_lr', 'focus', 'zoom', 'split_tb', 'close', 'unzoom', 'focus', 'new_window', 'select_window', 'split_lr', 'close', 'focus', 'zoom', 'select_window', 'split_tb'];
     const lim = { split_lr: 7, split_tb: 7, focus: 10, zoom: 7, unzoom: 7, close: 16, new_window: 7, select_window: 7 };
-    const rank = (a) => a <= 2 ? '師範' : a <= 3 ? '師範代' : a <= 5 ? '三段' : a <= 8 ? '初段' : '見習い';
+    const rank = (a) => a <= 2.5 ? '師範' : a <= 3.5 ? '師範代' : a <= 4.5 ? '黒帯' : a <= 6 ? '茶帯' : a <= 8 ? '緑帯' : '白帯';
     let best = Infinity;
     const runs = times.map((t, i) => {
       const log = qs.map((q) => { const s = +(t / 15 * (q === 'close' || q === 'select_window' ? 1.8 : 0.8)).toFixed(2); return { t: q, s, m: 0, l: lim[q], ...(s > lim[q] ? { o: 1 } : {}) }; });
@@ -2376,15 +2377,15 @@ async function loop10(browser) {
   const text = (sel) => page.$eval(sel, (e) => e.textContent).catch(() => '');
   ok(/昨日も解いた。今日も解くと 2 日連続/.test(await text('.today-again')), L + ' the title says yesterday was played and today makes a streak');
   ok(await page.$eval('#fine-first', (e) => e.hidden), L + ' the first-time line is gone once a run is in');
-  ok(/^三段まで あと \d+\.\d 秒$/.test(await text('[data-course="easy"] .wing-rank')), L + ' the 入門 card shows the next title and the seconds to it (' + (await text('[data-course="easy"] .wing-rank')) + ')');
-  ok(!(await page.$('[data-course="normal"] .wing-next')), L + ' 中級 is not yet the step up at 初段');
+  ok(/^黒帯まで あと \d+\.\d 秒$/.test(await text('[data-course="easy"] .wing-rank')), L + ' the 入門 card shows the next title and the seconds to it (' + (await text('[data-course="easy"] .wing-rank')) + ')');
+  ok(!(await page.$('[data-course="normal"] .wing-next')), L + ' 中級 is not yet the step up at 茶帯');
   ok(/^苦手: (ウィンドウ移動|ペインを閉じる)$/.test(await text('#keiko-sub')), L + ' the 稽古 button names the weak spots (' + (await text('#keiko-sub')) + ')');
   await shot(page, 'loop10-title-return');
-  // At 三段 on 入門, 中級 is the step up.
-  await page.evaluate((d) => localStorage.setItem('tmux-da', JSON.stringify(d)), seed([110, 92, 70]));
+  // At 黒帯 on 入門, 中級 is the step up.
+  await page.evaluate((d) => localStorage.setItem('tmux-da', JSON.stringify(d)), seed([110, 92, 56]));
   await page.reload();
-  ok(/^師範代まで あと \d+\.\d 秒$/.test(await text('[data-course="easy"] .wing-rank')), L + ' at 三段 the next is 師範代 (' + (await text('[data-course="easy"] .wing-rank')) + ')');
-  ok(/次はここ（入門で 三段）/.test(await text('[data-course="normal"] .wing-next')), L + ' the 中級 card says it is the step up');
+  ok(/^師範代まで あと \d+\.\d 秒$/.test(await text('[data-course="easy"] .wing-rank')), L + ' at 黒帯 the next is 師範代 (' + (await text('[data-course="easy"] .wing-rank')) + ')');
+  ok(/次はここ（入門で 黒帯）/.test(await text('[data-course="normal"] .wing-next')), L + ' the 中級 card says it is the step up');
   ok(!(await page.$('[data-course="hard"] .wing-next')), L + ' 上級 is not');
   // Play today: the result says what the next title needs; the title then shows the streak.
   await page.keyboard.press('Enter');
@@ -2392,7 +2393,7 @@ async function loop10(browser) {
   await waitResult(page, L);
   const nxt = await text('#result-body .em-rank small');
   const r = (await st(page)).result;
-  ok(r.rank === '師範' ? /最高の称号/.test(nxt) : /まで あと \d+\.\d 秒（\d+ 秒以内）/.test(nxt), L + ' the result says what the next title needs (' + nxt + ')');
+  ok(r.rank === '名人' ? /最高の称号/.test(nxt) : /まで あと \d+\.\d 秒（1 問 \d+\.\d\d 秒）/.test(nxt), L + ' the result says what the next title needs, per question too (' + nxt + ')');
   await shot(page, 'loop10-result');
   await page.waitForTimeout(800);
   await page.keyboard.press('Escape');
@@ -2404,7 +2405,7 @@ async function loop10(browser) {
   const en = await browser.newContext({ viewport: PHONE, reducedMotion: 'reduce', locale: 'en-US' });
   const p2 = await en.newPage();
   await p2.goto(PAGE);
-  await p2.evaluate((d) => localStorage.setItem('tmux-da', JSON.stringify(d)), seed([110, 92, 70]));
+  await p2.evaluate((d) => localStorage.setItem('tmux-da', JSON.stringify(d)), seed([110, 92, 56]));
   await p2.reload();
   const bits = await p2.$$eval('.wing-rank, .wing-next, .today-again, #keiko-sub, .fine', (l) => l.map((e) => e.textContent));
   ok(bits.length >= 4 && !bits.some((t) => /[ぁ-んァ-ヶ一-龠]/.test(t)), L + ' the English title has the same lines, in English (' + bits.join(' | ') + ')');
@@ -2581,6 +2582,130 @@ async function version(browser) {
   await ctx.close();
 }
 
+// The belt ladder: old dan titles become belts without demotion, the
+// course card wears the title reached, the ladder (all eight, with いまここ
+// and the next title per question) is a click from the course select, the
+// 免状 list has the first day of each title, the result says 昇格 only when
+// the house's highest title rises, the Lv is いまの調子, and English shows
+// romaji · meaning beside the kanji seal.
+async function belts(browser) {
+  const L = '[belts]';
+  const shotsDir = SHOTS ? path.join(SHOTS, 'belts') : '';
+  const snap = async (page, name) => { if (!shotsDir) return; fs.mkdirSync(shotsDir, { recursive: true }); await page.screenshot({ path: path.join(shotsDir, name + '.png'), fullPage: true }); };
+  // A schema 4 store from the dan days: 上級 once at 見習い, then 入門 at 初段 and 三段 (72 秒 = 4.8 秒 a question, 茶帯 by pace: the 黒帯 is kept).
+  const old = (a, t, course, n, rank, id) => ({ id, course, ver: 2, at: a, prefix: 'C-b', time: t, raw: t, misses: 0, overs: 0, guides: 0, keys: 20, n, rank, rec: true, qs: [] });
+  const store = { schema: 4, prefix: 'C-b', arena: { 'tmux:easy': { time: 72, misses: 0, date: '2026-10-12', runId: 'o2', ver: 2 }, 'tmux:hard': { time: 260, misses: 0, date: '2026-10-08', runId: 'o3', ver: 2 } },
+    runs: [old('2026-10-08T01:00:00Z', 260, 'hard', 16, '見習い', 'o3'), old('2026-10-10T01:00:00Z', 100, 'easy', 15, '初段', 'o1'), old('2026-10-12T01:00:00Z', 72, 'easy', 15, '三段', 'o2')] };
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce', colorScheme: 'light' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.evaluate((d) => localStorage.setItem('tmux-da', JSON.stringify(d)), store);
+  await page.reload();
+  const text = (sel) => page.$eval(sel, (e) => e.textContent.trim()).catch(() => '');
+  const db = await page.evaluate(() => window.tmuxDa.records());
+  ok(db.schema === 5 && db.runs.map((r) => r.rank).join() === '白帯,緑帯,黒帯', L + ' the dan titles become belts, never lower (' + db.runs.map((r) => r.rank).join() + ')');
+  ok(db.titles && db.titles.easy['黒帯'] === '2026-10-12' && db.titles.easy['白帯'] === '2026-10-10' && db.titles.hard['白帯'] === '2026-10-08' && !db.titles.easy['師範代'], L + ' the 免状 come from the old runs with their days');
+  // The course card: the title reached as the name tag, with its belt.
+  ok((await text('[data-course="easy"] .wing-title')) === '黒帯' && !!(await page.$('[data-course="easy"] .wing-title .belt.b-black:not(.s1)')), L + ' the 入門 card wears 黒帯 with a black belt');
+  ok((await text('[data-course="hard"] .wing-title')) === '白帯' && !!(await page.$('[data-course="hard"] .wing-title .belt.b-white, [data-course="hard"] .wing-title .belt:not(.b-green):not(.b-brown):not(.b-black):not(.b-red)')), L + ' the 上級 card wears 白帯');
+  ok(!(await page.$('[data-course="normal"] .wing-title')), L + ' a house never entered has no title');
+  ok((await text('[data-course="easy"] .wing-rank')) === '師範代まで あと 19.5 秒', L + ' the card counts from the title kept, not from the time (' + (await text('[data-course="easy"] .wing-rank')) + ')');
+  ok(/次はここ（入門で 黒帯）/.test(await text('[data-course="normal"] .wing-next')), L + ' 黒帯 on 入門 makes 中級 the step up');
+  ok(/いまの調子/.test(await text('#skill')) && /いまの調子 Lv\.\d+/.test(await text('#title-meta')), L + ' the Lv is labelled いまの調子 (' + (await text('#title-meta')) + ')');
+  await snap(page, 'title-ja-light');
+  // The ladder, from the course select.
+  await page.click('#btn-ladder');
+  ok((await st(page)).screen === 'records' && (await st(page)).recCourse === 'easy', L + ' 称号の一覧を見る opens the records of the course picked');
+  const ladder = await page.$$eval('.rec-ranks tbody tr', (l) => l.map((e) => [e.querySelector('.r-rank').textContent.trim(), e.querySelector('.r-time').textContent.trim(), e.querySelector('.r-star').textContent.trim(), !!e.querySelector('.belt')]));
+  ok(ladder.length === 8 && ladder[0][0] === '名人' && ladder[7][0] === '白帯', L + ' the ladder has all eight, 名人 at the top');
+  ok(ladder.map((r) => r[1]).join('|') === '20 秒以内|27 秒以内|38 秒以内|53 秒以内|68 秒以内|90 秒以内|120 秒以内|120 秒より遅い', L + ' each threshold on 入門 (' + ladder.map((r) => r[1]).join('|') + ')');
+  ok(ladder.every((r) => r[3]) && ladder.filter((r) => r[2] === 'いまここ').map((r) => r[0]).join() === '黒帯', L + ' a belt on every row; いまここ on 黒帯');
+  ok(await page.$$eval('.rec-ranks .belt', (l) => l.map((e) => e.className.replace('belt ', '')).join()) === 'b-red,b-black s3,b-black s2,b-black s1,b-black,b-brown,b-green,b-white', L + ' the belts: red, black with 3/2/1 stripes, black, brown, green, white');
+  ok((await text('.rec-ranks .rec-next')) === '師範代まで あと 19.5 秒（1 問 1.30 秒）', L + ' the next title in seconds, per question too (' + (await text('.rec-ranks .rec-next')) + ')');
+  ok(/帯の色/.test(await text('.rec-ranks .rec-empty')), L + ' the ladder explains the belts');
+  const menjo = await page.$$eval('.rec-menjo tbody tr', (l) => l.map((e) => Array.from(e.children).map((c) => c.textContent.trim()).join('/')));
+  ok(menjo.join('|') === '黒帯/入門/2026年10月12日|茶帯/入門/2026年10月12日|緑帯/入門/2026年10月10日|白帯/入門/2026年10月10日|白帯/上級/2026年10月8日', L + ' the 免状: title, course, first day, newest first (' + menjo.join('|') + ')');
+  ok((await text('.rec-tile:nth-child(2)')).replace(/\s+/g, '') === '最高の称号黒帯' && !!(await page.$('.rec-tile:nth-child(2) .belt')), L + ' the best-title tile wears the belt');
+  ok(await page.$$eval('.rec-panel:not(.rec-ranks):not(.rec-menjo) .rec-table .r-rank .belt', (l) => l.length) === 2, L + ' the run table has a belt per run');
+  ok(await page.evaluate(() => { const r = document.querySelector('.rec-ranks').getBoundingClientRect(); return r.top >= -2 && r.top < window.innerHeight; }), L + ' the ladder is scrolled into view');
+  await snap(page, 'records-ja-light');
+  // 中級: no runs, still the whole ladder and the 免状 of the other houses.
+  await page.click('[data-rec-course="normal"]');
+  ok(await page.$$eval('.rec-ranks tbody tr', (e) => e.length) === 8 && !(await page.$('.rec-ranks .is-rec')) && (await page.$$eval('.rec-menjo tbody tr', (e) => e.length)) === 5, L + ' a blank house shows the ladder with no いまここ and the 免状 list');
+  // Play 入門 fast: the house's highest title rises, so the result says 昇格.
+  await page.click('#btn-records-back');
+  await page.click('[data-course="easy"]');
+  await playCourse(page, 'Control+b', 'C-b', L, 'solve');
+  await waitResult(page, L);
+  const r = (await st(page)).result;
+  const up = ['名人', '達人', '師範', '師範代'].includes(r.rank);
+  ok(up === r.rankUp && (await text('#result-body .em-promo')) === (up ? r.rank + ' に昇格' : ''), L + ' 昇格 when the highest title rises (' + r.rank + ', ' + (await text('#result-body .em-rank')) + ')');
+  ok(!!(await page.$('#result-body .em-rank .belt')) && (await text('#result-body .hanko')).replace(/\s/g, '') === r.rank, L + ' the seal says the title in kanji, the belt beside it');
+  const nxt = await text('#result-body .em-rank small');
+  ok(r.rank === '名人' ? nxt === '最高の称号。' : /^.+まで あと \d+\.\d 秒（1 問 \d+\.\d\d 秒）$/.test(nxt), L + ' the gap to the next title, per question too (' + nxt + ')');
+  ok(/いまの調子/.test(await text('#result-body .em-skill')) && !/腕前 Lv/.test(await text('#result-body .em-rank')), L + ' the Lv is いまの調子, under the title');
+  const share = await text('#result-body .share-text');
+  ok(new RegExp('（お手本 53秒）' + r.rank + '\\n').test(share), L + ' the share text carries the title (' + share.split('\n')[0] + ')');
+  const db2 = await page.evaluate(() => window.tmuxDa.records());
+  ok(db2.titles.easy[r.rank] === new Date().toISOString().slice(0, 10) || !!db2.titles.easy[r.rank], L + ' the new title gets its 免状 today');
+  await snap(page, 'result-ja-light');
+  // Again: the title can only stay or rise, and the result says the highest held when this run is lower.
+  await page.click('#result-body [data-course="easy"]');
+  await playCourse(page, 'Control+b', 'C-b', L, 'solve');
+  await waitResult(page, L);
+  const r2 = (await st(page)).result;
+  const held = await page.evaluate(() => ADV.records.bestTitle('easy'));
+  ok(ADV_rankIndex(held) <= ADV_rankIndex(r2.rank) && (r2.rankUp ? !!(await page.$('#result-body .em-promo')) : /今回の称号/.test(await text('#result-body .em-rank'))), L + ' a second run never lowers the title (' + r2.rank + ', held ' + held + ')');
+  ok(held === r2.rank || (await text('#result-body .em-held')) === '（入門の最高は ' + held + '）', L + ' the highest title is named when this run is lower');
+  ok(errors.length === 0, L + ' no page errors and no network requests' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+
+  // English, on a phone, at night: romaji · meaning beside the kanji seal.
+  const en = await browser.newContext({ viewport: PHONE, reducedMotion: 'reduce', locale: 'en-US', colorScheme: 'dark' });
+  const p2 = await en.newPage();
+  const errors2 = watch(p2);
+  await p2.goto(PAGE);
+  await p2.evaluate((d) => localStorage.setItem('tmux-da', JSON.stringify(d)), store);
+  await p2.reload();
+  const t2 = (sel) => p2.$eval(sel, (e) => e.textContent.trim()).catch(() => '');
+  ok((await t2('[data-course="easy"] .wing-title')) === 'Kuro-obi · Black Belt', L + ' the English card reads Kuro-obi · Black Belt');
+  ok(/Form Lv\.\d+/.test(await t2('#title-meta')), L + ' the Lv is the current form in English');
+  await snap(p2, 'title-en-phone-dark');
+  await p2.click('#btn-ladder');
+  const lad = await p2.$$eval('.rec-ranks tbody tr .r-rank', (l) => l.map((e) => e.textContent.trim()));
+  ok(lad[0] === 'Meijin · Grand Master' && lad[3] === 'Shihan-dai · Assistant Master' && lad[7] === 'Shiro-obi · White Belt', L + ' the English ladder (' + lad.join(', ') + ')');
+  ok(/You are here/.test(await t2('.rec-ranks')) && /Certificates/.test(await t2('.rec-menjo')) && /Oct 12, 2026/.test(await t2('.rec-menjo')), L + ' いまここ and the 免状 in English');
+  await snap(p2, 'records-en-phone-dark');
+  const japanese = () => p2.evaluate(() => {
+    const out = [];
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode());) {
+      const el = n.parentElement;
+      if (!el || el.closest('[hidden]') || el.closest('.lang-toggle') || el.closest('[lang="ja"]') || !el.getClientRects().length) continue;
+      if (/[ぁ-んァ-ヶ一-龠]/.test(n.textContent)) out.push(n.textContent.trim().slice(0, 60));
+    }
+    return out;
+  });
+  ok(!(await japanese()).length, L + ' no Japanese on the English records' + ((await japanese()).length ? ': ' + (await japanese()).join(' | ') : ''));
+  await p2.click('#btn-records-back');
+  await p2.click('[data-course="easy"]');
+  await playCourse(p2, 'Control+b', 'C-b', L, 'solve');
+  await waitResult(p2, L);
+  const r3 = (await st(p2)).result;
+  const info = await p2.evaluate((t) => ADV.levels.rankInfo(t), r3.rank);
+  ok((await t2('#result-body .hanko')).replace(/\s/g, '') === r3.rank && (await p2.$eval('#result-body .hanko', (e) => e.getAttribute('lang'))) === 'ja', L + ' the English seal keeps the kanji');
+  ok(new RegExp(' · ' + info.romaji + ' · ' + info.en).test(await t2('#result-body .em-rank')) || new RegExp(info.romaji + ' · ' + info.en).test(await t2('#result-body .em-rank')), L + ' beside it: romaji · meaning (' + (await t2('#result-body .em-rank')) + ')');
+  const share2 = await t2('#result-body .share-text');
+  ok(new RegExp('\\(par 53s\\) · ' + info.romaji + ' ' + r3.rank + '\\n').test(share2), L + ' the English share carries romaji and kanji (' + share2.split('\n')[0] + ')');
+  ok(!(await japanese()).length, L + ' no Japanese on the English result outside the seal and the share title' + ((await japanese()).length ? ': ' + (await japanese()).join(' | ') : ''));
+  await snap(p2, 'result-en-phone-dark');
+  ok(errors2.length === 0, L + ' no page errors in English' + (errors2.length ? ': ' + errors2.join(' | ') : ''));
+  await en.close();
+}
+// The ladder index, as levels.js counts it (0 at 名人), for the checks above.
+const ADV_rankIndex = (t) => ['名人', '達人', '師範', '師範代', '黒帯', '茶帯', '緑帯', '白帯'].indexOf(t);
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -2621,6 +2746,7 @@ const parts = [
   ['loop11', loop11],
   ['loop14', loop14],
   ['version', version],
+  ['belts', belts],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
