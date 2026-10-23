@@ -426,3 +426,29 @@ test('load: runs that are not runs, and bests that are not times, are dropped', 
   assert.equal(saved.runs.length, 4, 'the store was written back clean');
   assert.ok(REC.learnt() && REC.weakTypes(3) && REC.skill() && REC.streak(), 'the derived views still work');
 });
+
+// ---- the key log kept with a run ---------------------------------------------
+const klog = (n) => ({ keys: Array.from({ length: n }, (_, i) => [i * 200, i % 2 ? '%' : 'Ctrl+b']), q: [0, 400, 800] });
+
+test('key logs: kept on the best of the course and the latest LOG_KEEP runs, dropped from the rest', () => {
+  const REC = fresh();
+  REC.add(run(40, { klog: klog(6) }));   // the best, kept
+  for (let i = 0; i < 5; i++) REC.add(run(50 + i, { klog: klog(6) }));
+  const runs = REC.runsOf('easy');
+  assert.equal(runs.length, 6);
+  assert.deepEqual(runs.map((r) => !!r.klog), [true, true, true, false, false, true], 'latest three and the best');
+  assert.equal(REC.LOG_KEEP, 3);
+  assert.equal(REC.ghostOf('easy').keys.keys.length, 6, 'the ghost brings its keys');
+  assert.equal(REC.runById(runs[0].id).id, runs[0].id);
+  assert.equal(REC.runById('nope'), null);
+});
+
+test('key logs: a broken one is dropped on load, the run stays', () => {
+  const store = memoryStorage({ 'tmux-da': JSON.stringify({ schema: 5, runs: [
+    { id: 'a', course: 'easy', time: 42, at: '2026-10-21T00:00:00Z', n: 15, qs: [], klog: 'x' },
+    { id: 'b', course: 'easy', time: 43, at: '2026-10-22T00:00:00Z', n: 15, qs: [], klog: { keys: [[0, 'a']], q: [0] } }] }) });
+  const REC = load(['levels.js', 'records.js'], { storage: store }).ADV.records;
+  const all = REC.load();
+  assert.equal(all.runs[0].klog, undefined);
+  assert.deepEqual(plain(all.runs[1].klog), { keys: [[0, 'a']], q: [0] });
+});

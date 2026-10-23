@@ -2875,6 +2875,126 @@ async function belts(browser) {
   ok(errors2.length === 0, L + ' no page errors in English' + (errors2.length ? ': ' + errors2.join(' | ') : ''));
   await en.close();
 }
+// Ghost race and replay: the 影 picked on the course select, the strip
+// with its question and keys under the bar (never over the house), the key
+// log and the fewest keys on the result, and この回を見る playing the run
+// again on the house, key for key.
+async function ghost(browser) {
+  const L = '[ghost]';
+  const shotsDir = SHOTS ? path.join(SHOTS, 'ghost') : '';
+  const snap = async (page, name, full) => { if (!shotsDir) return; fs.mkdirSync(shotsDir, { recursive: true }); await page.screenshot({ path: path.join(shotsDir, name + '.png'), fullPage: !!full }); };
+  for (const [tag, vp, scheme, locale] of [['desk', DESKTOP, 'light', 'ja-JP'], ['phone', PHONE, 'dark', 'en-US']]) {
+    const ctx = await browser.newContext({ viewport: vp, reducedMotion: 'reduce', colorScheme: scheme, locale, isMobile: vp === PHONE, hasTouch: vp === PHONE });
+    const page = await ctx.newPage();
+    const errors = watch(page);
+    const T = tag === 'phone' ? { ghost: 'Ghost', keys: 'Keys pressed', fewest: 'fewest', q: 'Question', watch: 'Watch this run', more: 'more keys' } : { ghost: '影', keys: '押したキー', fewest: '最短', q: '問題', watch: 'この回を見る', more: '最短より多く' };
+    await page.goto(PAGE);
+    // The 影 to race is picked on the course select and kept.
+    ok(await page.$$eval('#ghost-pick [data-ghost]', (b) => b.length) === 3, L + tag + ' three ghosts to pick from on the course select');
+    await page.click('#ghost-pick [data-ghost="own"]');
+    await page.reload();
+    ok((await st(page)).ghostPick === 'own' && await page.$eval('#ghost-pick [data-ghost="own"]', (b) => b.getAttribute('aria-pressed')) === 'true', L + tag + ' the pick (自己ベスト) survives a reload');
+    // A first run by the guide at a hand's pace (a replay of a run played in
+    // a few hundred ms would be over before anything can be seen): every
+    // key is logged, every question has its fewest.
+    const paced = async () => {
+      await waitPlay(page);
+      for (let guard = 0; guard < 200; guard++) {
+        const s = await st(page);
+        if (!s.run || s.run.phase !== 'play') break;
+        await page.waitForTimeout(90 + Math.random() * 120);
+        await followGuide(page, 'Control+b');
+      }
+    };
+    await page.click('#course-list [data-course="easy"]');
+    await paced();
+    await waitResult(page, L + tag + ' run 1');
+    let r = (await st(page)).result;
+    const run1 = (await page.evaluate(() => window.tmuxDa.records())).runs.slice(-1)[0];
+    ok(run1.klog && run1.klog.keys.length === r.keys && run1.klog.q.length === r.n, L + tag + ' the run keeps a key log: ' + r.keys + ' keys, ' + r.n + ' question starts');
+    ok(run1.day === (await page.evaluate(() => ADV.levels.dayKey())), L + tag + ' and the day of its order');
+    const lastKey = run1.klog.keys[run1.klog.keys.length - 1][0] / 1000;
+    ok(Math.abs(lastKey - r.raw) < 0.3, L + tag + ' the last key is at the clock\'s end (' + lastKey.toFixed(2) + ' vs ' + r.raw.toFixed(2) + ')');
+    const bounds = run1.klog.q.slice(1).map((t, i) => Math.abs((t - run1.klog.q[i]) / 1000 - r.qlog[i].s));
+    ok(Math.max(...bounds) < 0.1, L + tag + ' the question starts match the splits (worst ' + Math.max(...bounds).toFixed(3) + ' s)');
+    const gaps = run1.klog.keys.slice(1).map((e, i) => e[0] - run1.klog.keys[i][0]);
+    ok(Math.min(...gaps) >= 0 && new Set(gaps).size > 2, L + tag + ' the keys come in order at a hand\'s uneven pace');
+    ok(r.qlog.every((q) => typeof q.p === 'number' && q.p > 0) && r.qlog.every((q) => typeof q.k === 'number'), L + tag + ' every question has its fewest keys and its count: ' + r.qlog.map((q) => q.k + '/' + q.p).join(' '));
+    const par = r.qlog.reduce((a, q) => a + q.p, 0);
+    ok(r.qlog.every((q) => q.k === q.p), L + tag + ' following the guide presses exactly the fewest (' + r.keys + ' = ' + par + ')');
+    const facts = await page.$eval('#result-body .em-facts', (e) => e.textContent);
+    ok(facts.indexOf(T.keys) >= 0 && facts.indexOf(r.keys + ' / ' + T.fewest + ' ' + par) >= 0, L + tag + ' the result says 押したキー N / 最短 M: ' + facts.replace(/\s+/g, ' ').slice(-60));
+    ok(await page.$('#result-body [data-replay]') !== null, L + tag + ' and offers この回を見る');
+    await snap(page, 'result-' + tag, true);
+    // The replay: the same keys on the same house, question by question.
+    await page.click('#result-body [data-replay]');
+    await page.waitForFunction(() => window.tmuxDa.state().replay, null, { timeout: 5000 });
+    let s = await st(page);
+    ok(s.screen === 'game' && s.replay.playing && s.replay.n === r.keys, L + tag + ' この回を見る opens the house in a replay of ' + s.replay.n + ' keys');
+    ok((await page.$eval('#playbar', (e) => e.textContent)).indexOf(tag === 'phone' ? 'Replay' : '再生') >= 0, L + tag + ' the bar says 再生');
+    ok(await page.$$eval('#ghostbar [data-rp]', (b) => b.map((x) => x.dataset.rp).join(',')) === 'toggle,speed,prev,next,close', L + tag + ' the controls: pause, ×2, prev, next, close');
+    const over = await page.evaluate(() => { const g = document.querySelector('#ghostbar').getBoundingClientRect(), t = document.querySelector('#term').getBoundingClientRect(); return g.bottom <= t.top + 1 && g.height > 0; });
+    ok(over, L + tag + ' the strip sits above the house, not over it');
+    await page.waitForTimeout(1200);
+    await snap(page, 'replay-' + tag);
+    s = await st(page);
+    ok(s.replay.i > 0 && s.replay.t > 1000, L + tag + ' it runs at real speed (' + s.replay.i + ' keys fed after ' + s.replay.t + ' ms)');
+    await page.keyboard.press('Space');
+    const atPause = (await st(page)).replay;
+    await page.waitForTimeout(400);
+    ok(!atPause.playing && (await st(page)).replay.i === atPause.i, L + tag + ' Space pauses: no key is fed');
+    const i0 = (await st(page)).run.i;
+    await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight');
+    s = await st(page);
+    ok(s.run.i === Math.min(r.n - 1, i0 + 2) && s.replay.i >= s.run.i * 2, L + tag + ' → jumps to the next question (' + (i0 + 1) + ' → ' + (s.run.i + 1) + ', ' + s.replay.i + ' keys fed at once)');
+    await page.keyboard.press('ArrowLeft');
+    ok((await st(page)).run.i === s.run.i - 1, L + tag + ' ← jumps back');
+    await page.click('#ghostbar [data-rp="speed"]');
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => { const s = window.tmuxDa.state(); return s.replay && (s.replay.done || s.replay.lost); }, null, { timeout: 40000 });
+    s = await st(page);
+    ok(s.replay.speed === 2 && s.replay.done && !s.replay.lost && s.run.i === r.n, L + tag + ' at ×2 the replay reaches the end with every question solved as it was (misses ' + s.run.misses + ')');
+    ok(s.run.misses === r.misses, L + tag + ' the same misses as the run');
+    await snap(page, 'replay-end-' + tag);
+    await page.keyboard.press('Escape');
+    ok((await st(page)).screen === 'result' && !(await st(page)).replay, L + tag + ' Esc closes the replay back to the result');
+    // A second run races the first as its ghost: the strip shows its question and keys.
+    await page.click('#result-body [data-title]');
+    await page.click('#course-list [data-course="easy"]');
+    await waitPlay(page);
+    await page.waitForTimeout(700);
+    s = await st(page);
+    ok(s.ghost && !s.ghost.today && s.ghost.keys === run1.keys, L + tag + ' the own best is the ghost, with its ' + s.ghost.keys + ' keys');
+    const strip = await page.$eval('#ghostbar', (e) => ({ text: e.textContent, kbd: e.querySelectorAll('kbd').length, hidden: e.hidden, h: e.getBoundingClientRect().height }));
+    ok(!strip.hidden && strip.text.indexOf(T.ghost) >= 0 && strip.text.indexOf(T.q) >= 0 && strip.kbd >= 1, L + tag + ' the strip says where the ghost is and what it presses: ' + strip.text);
+    ok(strip.h < 44, L + tag + ' one line (' + strip.h + ' px)');
+    ok(await page.evaluate(() => { const g = document.querySelector('#ghostbar').getBoundingClientRect(), t = document.querySelector('#term').getBoundingClientRect(); return g.bottom <= t.top + 1; }), L + tag + ' and never over the house');
+    await snap(page, 'strip-' + tag);
+    // One key too many on the first question: the result lists it against the fewest.
+    const before = (await st(page)).run.i;
+    await page.keyboard.press('Control+b'); await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Control+b'); await page.keyboard.press('ArrowLeft');
+    ok((await st(page)).run.i === before, L + tag + ' two moves that change nothing (prefix → →, prefix → ←) do not solve the question');
+    await paced();
+    await waitResult(page, L + tag + ' run 2');
+    r = (await st(page)).result;
+    const extra = r.qlog.filter((q) => q.k > q.p);
+    ok(extra.length >= 1 && extra[0].k - extra[0].p >= 2, L + tag + ' the question with the extra keys is over its fewest (' + extra.map((q) => q.t + ' ' + q.k + '/' + q.p).join(', ') + ')');
+    const overText = await page.$eval('#result-body .em-overkeys', (e) => e.textContent).catch(() => '');
+    ok(overText.indexOf(T.more) >= 0, L + tag + ' and is listed under 最短より多く押した問題: ' + overText.replace(/\s+/g, ' '));
+    ok(r.ghost && r.ghost.name === '自分', L + tag + ' the result reckons against the ghost');
+    // The replay from the records' list of runs.
+    await page.click('#result-body [data-records]');
+    ok(await page.$$eval('#records-body a[data-replay]', (a) => a.length) === 2, L + tag + ' both runs offer この回を見る in the records');
+    await page.click('#records-body a[data-replay]');
+    await page.waitForFunction(() => window.tmuxDa.state().replay, null, { timeout: 5000 });
+    await page.keyboard.press('Escape');
+    ok((await st(page)).screen === 'records', L + tag + ' Esc from a replay opened in the records goes back there');
+    ok(errors.length === 0, L + tag + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+    await ctx.close();
+  }
+}
+
 // The ladder index, as levels.js counts it (0 at 名人), for the checks above.
 const ADV_rankIndex = (t) => ['名人', '達人', '師範', '師範代', '黒帯', '茶帯', '緑帯', '白帯'].indexOf(t);
 
@@ -2920,6 +3040,7 @@ const parts = [
   ['loop14', loop14],
   ['version', version],
   ['belts', belts],
+  ['ghost', ghost],
   ['sound', sound]
 ];
 const browser = await chromium.launch();

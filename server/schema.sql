@@ -44,3 +44,21 @@ CREATE TABLE IF NOT EXISTS hits (
 -- a 合言葉. The Worker also creates this on first use.
 CREATE TABLE IF NOT EXISTS events (day TEXT NOT NULL, v TEXT NOT NULL, e TEXT NOT NULL, c TEXT NOT NULL, n INTEGER NOT NULL, at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS events_day ON events (day, e);
+
+-- What was pressed in a ranked run (the ghost's keys, the replay): JSON
+-- { keys: [[ms, label], ...], q: [ms per question] }. The Worker also
+-- creates this on first use.
+CREATE TABLE IF NOT EXISTS keylogs (
+  key_hash TEXT NOT NULL,
+  run_id   TEXT NOT NULL,
+  log      TEXT NOT NULL,
+  PRIMARY KEY (key_hash, run_id)
+);
+
+-- A player's published .tmux.conf, as pasted (at most 8 KB). The Worker
+-- also creates this on first use.
+CREATE TABLE IF NOT EXISTS confs (
+  key_hash TEXT PRIMARY KEY,
+  text     TEXT NOT NULL,
+  at       TEXT NOT NULL
+);
