@@ -50,12 +50,24 @@ python3 -m http.server -d web 8000       # または http://localhost:8000/
 
 ## サーバ（`server/`）
 
-ランキングと引き継ぎのための小さな API。Cloudflare Workers ＋ D1（SQLite）。アカウントは無く、合言葉は SHA-256 だけを保存する。記録の検証（1 問あたり平均 0.4 秒未満、1 問 0.1 秒未満、合計が合わない記録、途中で長く止まった記録、順番を変えた回は弾く）と、アドレスごとの回数制限をする。
+ランキングと引き継ぎのための小さな API。Cloudflare Workers ＋ D1（SQLite）。アカウントは無く、合言葉は SHA-256 だけを保存する。記録の検証（1 問あたり平均 0.4 秒未満、1 問 0.1 秒未満、合計が合わない記録、その日の出題順でない記録、途中で長く止まった記録、順番を変えた回は弾く）と、アドレスごとの回数制限（分ごと、合言葉の新規作成は日ごとも）をする。自分の .tmux.conf で遊んだ記録はランキングに「自分の設定」と出る。名前は見えない文字を落とし、制御文字や積み重ねたアクセントを弾く。
 
 ```bash
 cd server
 npx wrangler d1 execute tmux-da --remote --file schema.sql   # 表を作る（初回だけ）
 npx wrangler deploy
+```
+
+表を変えたときは `server/migrations/` に ALTER を置く（既存のデータに安全なものだけ）。Worker は初回に自分でも当てるが、デプロイ前に手で当てておくのが確実:
+
+```bash
+npx wrangler d1 execute tmux-da --remote --file migrations/0001-scores-own.sql
+```
+
+荒らしの名前や記録を消すには（合言葉は分からないので名前で）:
+
+```bash
+npx wrangler d1 execute tmux-da --remote --command "DELETE FROM scores WHERE key_hash = (SELECT key_hash FROM players WHERE name = 'その名前'); UPDATE players SET name = NULL WHERE name = 'その名前'"
 ```
 
 ステージング（本番と別の Worker と D1）。試しの名前や記録はこちらへ送る。ページは `?api=staging` を付けるとこちらにつながる。

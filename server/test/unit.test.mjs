@@ -2,10 +2,14 @@
 //   node --test server/test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeKey, checkRun, cleanRun, jstDay, COURSES, MIN_Q, MIN_AVG, PAUSE_MAX } from '../src/rules.js';
+import { normalizeKey, cleanName, checkRun, cleanRun, jstDay, dailyOrder, orderDays, QUESTIONS, COURSES, MIN_Q, MIN_AVG, PAUSE_MAX, NAME_MAX } from '../src/rules.js';
+import { load, plain } from '../../web/test/unit/load.mjs';
 
+// A run on today's order of the course (`n` questions of it: a short run
+// is one with questions missing).
 const run = (n, s = 1.5, extra = {}) => {
-  const qs = Array.from({ length: n }, () => ({ t: 'split_lr', s, m: 0 }));
+  const course = extra.course && QUESTIONS[extra.course] ? extra.course : 'normal';
+  const qs = dailyOrder(course, jstDay(new Date())).slice(0, n).map((t) => ({ t, s, m: 0 }));
   return { id: 'r_x', course: 'normal', ver: 2, time: +(n * s).toFixed(2), qs, ...extra };
 };
 
@@ -29,8 +33,61 @@ test('checkRun: a human run adds up', () => {
   assert.equal(c.time, 30);
 });
 
-test('checkRun: a run on the player\'s own keys is ranked like any other', () => {
-  assert.equal(checkRun({ ...run(COURSES.normal), conf: 1, prefix: 'Ctrl+a' }).time, 30);
+test('checkRun: a run on the player\'s own keys is ranked like any other, and marked', () => {
+  const c = checkRun({ ...run(COURSES.normal), conf: 1, prefix: 'Ctrl+a' });
+  assert.deepEqual([c.time, c.own], [30, 1]);
+  assert.equal(checkRun(run(COURSES.normal)).own, 0);
+});
+
+test('the courses here are the courses of levels.js', () => {
+  const LV = load(['i18n.js', 'levels.js']).ADV.levels;
+  const mine = Object.fromEntries(LV.COURSES.map((c) => [c.id, plain(c.qs)]));
+  assert.deepEqual(mine, QUESTIONS);
+  assert.ok(LV.COURSES.every((c) => c.ver === 2), 'a course change bumps ver and VER together');
+});
+
+test('today\'s order: fixed by the day and the course, unzoom right after zoom', () => {
+  const a = dailyOrder('easy', '2026-10-23'), b = dailyOrder('easy', '2026-10-24');
+  assert.deepEqual(dailyOrder('easy', '2026-10-23'), a);
+  assert.notDeepEqual(a, b);
+  assert.deepEqual([...a].sort(), [...QUESTIONS.easy].sort());
+  for (const day of ['2026-10-23', '2026-10-24', '2026-11-01']) {
+    for (const course of Object.keys(QUESTIONS)) {
+      const o = dailyOrder(course, day);
+      o.forEach((t, i) => {
+        if (t === 'unzoom' && o.indexOf('zoom') >= 0) assert.equal(o[i - 1], 'zoom', course + ' ' + day + ': unzoom follows zoom');
+      });
+    }
+  }
+  assert.deepEqual(orderDays(new Date('2026-10-23T03:00:00Z')), ['2026-10-22', '2026-10-23', '2026-10-24']);
+});
+
+test('checkRun: the questions must be today\'s (or the day before or after: a run over midnight, a clock ahead)', () => {
+  const now = new Date();
+  const at = (day) => ({ ...run(20), qs: dailyOrder('normal', day).map((t) => ({ t, s: 1.5, m: 0 })) });
+  for (const day of orderDays(now)) assert.equal(checkRun(at(day), now).time, 30, day);
+  assert.throws(() => checkRun(at('2026-01-01'), now), /order/, 'another day\'s order');
+  const r = run(20);
+  r.qs.reverse();
+  assert.throws(() => checkRun(r, now), /order/, 'today\'s questions backwards');
+  const all = { ...run(20), qs: Array.from({ length: 20 }, () => ({ t: 'split_lr', s: 1.5, m: 0 })) };
+  assert.throws(() => checkRun(all, now), /order/, 'the same easy question twenty times');
+  const other = { ...run(20), course: 'easy', qs: dailyOrder('easy', jstDay(now)).map((t) => ({ t, s: 2, m: 0 })), time: 30 };
+  assert.equal(checkRun(other, now).time, 30, 'the right course');
+  assert.throws(() => checkRun({ ...other, course: 'hard' }, now), /./, 'easy\'s questions on hard');
+});
+
+test('cleanName: what goes on the boards', () => {
+  assert.equal(cleanName('  たまご  '), 'たまご');
+  assert.equal(cleanName('ta  ma go'), 'ta ma go');
+  assert.equal(cleanName('🐣ひよこ'), '🐣ひよこ');
+  assert.equal(cleanName('é'.normalize('NFD')), 'é', 'NFC');
+  assert.equal(cleanName('たまご\u200b'), 'たまご', 'a zero-width space is dropped, not a second たまご');
+  assert.equal(cleanName('\u202eabc'), 'abc', 'direction marks are dropped');
+  assert.equal(cleanName('あ'.repeat(NAME_MAX)), 'あ'.repeat(NAME_MAX));
+  for (const bad of [null, 42, '', '   ', 'あ'.repeat(NAME_MAX + 1), '<b>', 'a\u0000b', '\u200b\u200b', '\u3099\u3099', '…', 'a\u0301\u0301\u0301\u0301', '\ue000']) {
+    assert.equal(cleanName(bad), null, JSON.stringify(bad));
+  }
 });
 
 test('checkRun: one quick question is fine when the run as a whole is humanly paced', () => {

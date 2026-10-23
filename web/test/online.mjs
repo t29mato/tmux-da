@@ -7,6 +7,7 @@ import path from 'node:path';
 
 // Playwright from the directory the script is run in (as playthrough.mjs).
 const { chromium } = createRequire(path.join(process.cwd(), 'noop.js'))('playwright');
+import { dailyOrder, jstDay } from '../../server/src/rules.js';
 
 const API = process.env.API || 'http://localhost:8787';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -58,11 +59,11 @@ if (SHOTS) await A.page.screenshot({ path: SHOTS + '/online-sync.png', fullPage:
 
 // A plays: the result enters the board.
 await A.page.click('#btn-records-back');
-await A.page.evaluate(() => {
+await A.page.evaluate((order) => {
   // A finished run through the game's own path, at a human pace.
-  const r = { course: 'easy', prefix: 'C-b', time: 21, raw: 21, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: Array.from({ length: 15 }, () => ({ t: 'split_lr', s: 1.4, m: 0 })) };
+  const r = { course: 'easy', prefix: 'C-b', time: 21, raw: 21, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: order.map((t) => ({ t, s: 1.4, m: 0 })) };
   return ADV.net.submit(Object.assign(r, { id: 'r_online_' + Date.now(), ver: 2, at: new Date().toISOString() }));
-});
+}, dailyOrder('easy', jstDay(new Date())));
 await A.page.click('#btn-records');
 await tab(A.page, 'board');
 await A.page.waitForSelector('.rec-table.board tr.is-me');
@@ -102,8 +103,36 @@ await B.page.waitForSelector('#playbar .pb-ghost');
 ok(/影/.test(await B.page.$eval('#playbar .pb-ghost', (e) => e.textContent)), 'B: the ghost shows in the bar: ' + (await B.page.$eval('#playbar .pb-ghost', (e) => e.textContent)));
 if (SHOTS) await B.page.screenshot({ path: SHOTS + '/online-ghost.png' });
 
+// The order the game asks today is the order the server expects (its copy
+// of the shuffle): a real run of each course passes the check.
+for (const course of ['easy', 'normal', 'hard']) {
+  const C = await open();
+  await C.page.click('#course-list [data-course="' + course + '"]');
+  await C.page.waitForFunction(() => window.tmuxDa.state().run && window.tmuxDa.state().run.phase === 'play', null, { timeout: 10000 });
+  const asked = await C.page.evaluate(() => window.tmuxDa.state().run.qs);
+  const expect = dailyOrder(course, jstDay(new Date()));
+  ok(JSON.stringify(asked) === JSON.stringify(expect), course + ': the game asks today\'s questions in the server\'s order (' + asked.join(' ') + ')');
+  await C.page.context().close();
+}
+
+// A run on the player's own .tmux.conf is marked on the board.
+await A.page.evaluate((order) => {
+  const r = { course: 'easy', prefix: 'Ctrl+a', conf: 1, time: 18, raw: 18, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: order.map((t) => ({ t, s: 1.2, m: 0 })) };
+  return ADV.net.submit(Object.assign(r, { id: 'r_own_' + Date.now(), ver: 2, at: new Date().toISOString() }));
+}, dailyOrder('easy', jstDay(new Date())));
+const D = await open();
+await D.page.click('#btn-records');
+await tab(D.page, 'board');
+await D.page.waitForSelector('.rec-table.board tbody tr');
+const myRow = await D.page.$$eval('.rec-table.board tbody tr', (trs, n) => {
+  const tr = trs.find((t) => t.children[1].textContent.indexOf(n) === 0);
+  return tr ? { text: tr.textContent, own: !!tr.querySelector('.r-own') } : null;
+}, name);
+ok(myRow && myRow.own && /18\.0秒/.test(myRow.text) && /自分の設定/.test(myRow.text), 'D: the own-config best shows with its mark: ' + (myRow && myRow.text));
+if (SHOTS) await D.page.screenshot({ path: SHOTS + '/online-board-own.png', fullPage: true });
+
 // The unknown 合言葉 above is a 404 on purpose; anything else is a fault.
-const errs = A.errors.concat(B.errors).filter((e) => !/status of 404/.test(e));
+const errs = A.errors.concat(B.errors, D.errors).filter((e) => !/status of 404/.test(e));
 ok(errs.length === 0, 'no page errors' + (errs.length ? ': ' + errs.join(' | ') : ''));
 await browser.close();
 console.log(failed ? failed + ' FAILED' : 'all passed');

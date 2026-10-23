@@ -1,4 +1,6 @@
 // Smoke test of a running server (wrangler dev, or the deployed one): API=https://... node server/smoke.mjs
+import { dailyOrder, jstDay } from './src/rules.js';
+
 const API = process.env.API || 'http://localhost:8787';
 let failed = 0;
 const ok = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); if (!c) failed++; };
@@ -9,10 +11,11 @@ const post = async (p, body) => {
 const get = async (p) => { const r = await fetch(API + p); return { status: r.status, body: await r.json() }; };
 
 const tag = Date.now().toString(36);
+// Today's questions of the course with these seconds (fewer: questions missing).
 const run = (id, course, splits, misses = 0) => ({
   id, course, ver: 2, at: new Date().toISOString(),
   time: +(splits.reduce((a, b) => a + b, 0) + 2 * misses).toFixed(2), misses,
-  qs: splits.map((s, i) => ({ t: 'split_lr', s, m: i === 0 ? misses : 0 }))
+  qs: splits.map((s, i) => ({ t: dailyOrder(course, jstDay(new Date()))[i], s, m: i === 0 ? misses : 0 }))
 });
 
 const a = await post('/v1/keys', {});
@@ -45,6 +48,9 @@ ok((await post('/v1/scores', { key, run: run('r_' + tag + 'c', 'normal', Array(2
 const bad = run('r_' + tag + 'd', 'normal', Array(20).fill(1)); bad.time = 5;
 ok((await post('/v1/scores', { key, run: bad })).status === 400, 'a time that does not add up is refused');
 ok((await post('/v1/scores', { key, run: run('r_' + tag + 'e', 'normal', Array(19).fill(1)) })).status === 400, 'a run with a question missing is refused');
+const wrong = run('r_' + tag + 'h', 'normal', Array(20).fill(1)); wrong.qs.reverse();
+ok((await post('/v1/scores', { key, run: wrong })).status === 400, 'a run not in today\'s order is refused');
+ok((await post('/v1/name', { key: b.body.key, name: name + '\u200b' })).status === 409, 'a zero-width space does not make a second name');
 const withMiss = run('r_' + tag + 'f', 'normal', Array(20).fill(1.4), 2);
 ok((await post('/v1/scores', { key, run: withMiss })).status === 200, 'misses add +2 秒 each and still add up');
 

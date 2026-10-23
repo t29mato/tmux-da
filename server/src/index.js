@@ -13,10 +13,12 @@
 //   POST /v1/ev     { v, e, c, n }      → 204                one step of a visit (counts only)
 //   GET  /v1/stats?days=                → { days }           the counts per day
 
-import { COURSES, VER, Fail, normalizeKey, cleanRun, jstDay, checkRun } from './rules.js';
+import { COURSES, VER, Fail, normalizeKey, cleanName, cleanRun, jstDay, checkRun } from './rules.js';
 
 const MAX_RUNS = 900, MAX_BODY = 600 * 1024;
 const LIMITS = { keys: 5, sync: 30, name: 10, scores: 20, ev: 60 };
+// Per address per day (UTC): a script making a name for every row of a board.
+const DAY_LIMITS = { keys: 40 };
 
 // What a visit may report: the page opened, a course started, its first
 // question solved, the course finished, a run left half way.
@@ -95,10 +97,15 @@ async function route(req, env) {
 async function limit(env, req, what) {
   const ip = (req.headers.get('CF-Connecting-IP') || 'local') + ':' + what;
   const minute = Math.floor(Date.now() / 60000);
-  const row = await env.DB.prepare(
-    'INSERT INTO hits (ip, minute, n) VALUES (?1, ?2, 1) ON CONFLICT (ip, minute) DO UPDATE SET n = n + 1 RETURNING n'
-  ).bind(ip, minute).first();
+  const stmt = env.DB.prepare('INSERT INTO hits (ip, minute, n) VALUES (?1, ?2, 1) ON CONFLICT (ip, minute) DO UPDATE SET n = n + 1 RETURNING n');
+  const row = await stmt.bind(ip, minute).first();
   if (row && row.n > LIMITS[what]) throw new Fail(429, 'too many requests');
+  if (DAY_LIMITS[what]) {
+    // The day's bucket sits at the minute the day ends, so the sweep below
+    // takes it with the others once the day is over.
+    const day = await stmt.bind(ip + ':day', (Math.floor(minute / 1440) + 1) * 1440).first();
+    if (day && day.n > DAY_LIMITS[what]) throw new Fail(429, 'too many requests');
+  }
   if (Math.random() < 0.02) await env.DB.prepare('DELETE FROM hits WHERE minute < ?1').bind(minute - 5).run();
 }
 
@@ -145,22 +152,32 @@ async function sync(env, hash, runs) {
 // ---- boards -------------------------------------------------------------------
 
 async function setName(env, hash, name) {
-  const n = typeof name === 'string' ? name.normalize('NFC').trim().replace(/\s+/g, ' ') : '';
-  if (!n || [...n].length > 12 || /[\u0000-\u001f<>]/.test(n)) throw new Fail(400, 'bad name');
+  const n = cleanName(name);
+  if (!n) throw new Fail(400, 'bad name');
   const taken = await env.DB.prepare('SELECT key_hash FROM players WHERE name = ?1').bind(n).first();
   if (taken && taken.key_hash !== hash) throw new Fail(409, 'name taken');
   await env.DB.prepare('UPDATE players SET name = ?1 WHERE key_hash = ?2').bind(n, hash).run();
   return json({ name: n });
 }
 
+// scores.own (1: the player's own .tmux.conf) came after the first boards;
+// a database from before gets the column on first use.
+const ownDone = new WeakSet();
+async function ownColumn(env) {
+  if (ownDone.has(env.DB)) return;
+  try { await env.DB.prepare('ALTER TABLE scores ADD COLUMN own INTEGER NOT NULL DEFAULT 0').run(); } catch (e) { /* already there */ }
+  ownDone.add(env.DB);
+}
+
 async function enter(env, hash, run) {
   const me = await env.DB.prepare('SELECT name FROM players WHERE key_hash = ?1').bind(hash).first();
   if (!me || !me.name) throw new Fail(400, 'set a name first');
-  const c = checkRun(run);
   const now = new Date();
+  const c = checkRun(run, now);
+  await ownColumn(env);
   await env.DB.prepare(
-    'INSERT OR IGNORE INTO scores (run_id, key_hash, course, ver, time, day, at, splits) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)'
-  ).bind(run.id, hash, run.course, VER, c.time, jstDay(now), now.toISOString(), JSON.stringify(c.splits)).run();
+    'INSERT OR IGNORE INTO scores (run_id, key_hash, course, ver, time, day, at, splits, own) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)'
+  ).bind(run.id, hash, run.course, VER, c.time, jstDay(now), now.toISOString(), JSON.stringify(c.splits), c.own).run();
   // Where it stands today among each player's best.
   const day = jstDay(now);
   const rank = await env.DB.prepare(
@@ -185,8 +202,9 @@ async function bestRows(env, q, max) {
   const course = q.get('course');
   if (!COURSES[course]) throw new Fail(400, 'bad course');
   const w = spanWhere(q.get('span') || 'today');
+  await ownColumn(env);
   const res = await env.DB.prepare(
-    'SELECT p.name, s.time, s.day, s.splits, s.at FROM scores s JOIN players p ON p.key_hash = s.key_hash ' +
+    'SELECT p.name, s.time, s.day, s.splits, s.at, s.own FROM scores s JOIN players p ON p.key_hash = s.key_hash ' +
     'WHERE s.course = ?1 AND s.ver = ?2' + w.sql + ' AND p.name IS NOT NULL ' +
     'AND s.time = (SELECT MIN(t.time) FROM scores t WHERE t.key_hash = s.key_hash AND t.course = s.course AND t.ver = s.ver' + w.sql.replace(/s\./g, 't.') + ') ' +
     'GROUP BY s.key_hash ORDER BY s.time, s.at LIMIT ' + max
@@ -196,14 +214,14 @@ async function bestRows(env, q, max) {
 
 async function board(env, q) {
   const rows = await bestRows(env, q, 50);
-  return json({ rows: rows.map((r, i) => ({ rank: i + 1, name: r.name, time: r.time, day: r.day })) }, 200, { 'Cache-Control': 'max-age=15' });
+  return json({ rows: rows.map((r, i) => ({ rank: i + 1, name: r.name, time: r.time, day: r.day, own: r.own ? 1 : 0 })) }, 200, { 'Cache-Control': 'max-age=15' });
 }
 
 async function ghost(env, q) {
   const rows = await bestRows(env, q, 1);
   if (!rows.length) return json({ ghost: null });
   const r = rows[0];
-  return json({ ghost: { name: r.name, time: r.time, day: r.day, splits: JSON.parse(r.splits) } }, 200, { 'Cache-Control': 'max-age=15' });
+  return json({ ghost: { name: r.name, time: r.time, day: r.day, own: r.own ? 1 : 0, splits: JSON.parse(r.splits) } }, 200, { 'Cache-Control': 'max-age=15' });
 }
 
 // ---- counts -------------------------------------------------------------------
