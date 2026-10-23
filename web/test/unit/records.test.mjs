@@ -326,3 +326,41 @@ test('drillRecent: the latest logged questions with the drill\'s own after them'
   assert.equal(r[15].t, 'zoom');
   assert.equal(r[0].t, 'split_lr');
 });
+
+// --- round 11: a broken store never breaks the title ---------------------------
+
+test('load: a store that is not an object counts as empty', () => {
+  for (const raw of ['"hello"', '123', 'null', '[1,2]', '{oops']) {
+    const REC = fresh({ 'tmux-da': raw });
+    const all = REC.load();
+    assert.deepEqual(plain(all.runs), [], raw);
+    assert.equal(REC.best('easy'), null, raw);
+    assert.equal(REC.add(run(40)).record, true, raw + ': a run can still be added');
+  }
+});
+
+test('load: runs that are not runs, and bests that are not times, are dropped', () => {
+  const store = memoryStorage({ 'tmux-da': JSON.stringify({
+    schema: 4,
+    runs: [null, 1, 'x', { course: 'easy' }, { id: 'a', course: 'easy', time: 'fast', at: 5, n: 0, qs: 'abc' },
+      { id: 'b', course: 'easy', time: 50, at: 'yesterday', n: 15, qs: [] },
+      { id: 'c', course: 'easy', time: 44, at: '2026-10-22T00:00:00Z', n: 15, qs: [null, { t: 'zoom', s: 3 }, 7] },
+      { id: 'd', course: 'easy', time: 41, at: 1761091200000, n: 15, qs: 'nope' }],
+    arena: { 'tmux:easy': { time: 'x' }, 'tmux:hard': null, 'tmux:normal': 5 }
+  }) });
+  const REC = load(['levels.js', 'records.js'], { storage: store }).ADV.records;
+  const all = REC.load();
+  assert.deepEqual(plain(all.runs.map((r) => r.id)), ['c', 'd']);
+  assert.deepEqual(plain(all.runs[0].qs), [{ t: 'zoom', s: 3 }], 'entries that are not questions go');
+  assert.deepEqual(plain(all.runs[1].qs), [], 'a qs that is not a list becomes an empty one');
+  assert.equal(new Date(all.runs[1].at).getTime(), 1761091200000, 'a number is taken as a time');
+  assert.equal(typeof all.runs[1].at, 'string');
+  assert.deepEqual(plain(all.arena), {});
+  assert.equal(REC.best('easy').time, 41, 'with no best kept, the fastest run is the best');
+  assert.equal(REC.stats('easy').best, 41);
+  assert.equal(REC.add(run(45)).record, false, 'and a slower run is no record');
+  assert.equal(REC.add(run(40)).record, true);
+  const saved = JSON.parse(store.dump()['tmux-da']);
+  assert.equal(saved.runs.length, 4, 'the store was written back clean');
+  assert.ok(REC.learnt() && REC.weakTypes(3) && REC.skill() && REC.streak(), 'the derived views still work');
+});

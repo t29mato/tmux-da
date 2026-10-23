@@ -124,3 +124,31 @@ test('breakPane: the pane leaves for a window of its own, which becomes current;
   assert.equal(s.active, fresh.id);
   assert.equal(T.freeIndex(s), 1, 'new-window would fill the gap');
 });
+
+// Three rooms along the top (the goal leftmost) over one wide room: from the
+// top right, the nearest step towards the goal is ↓ (the wide room's middle
+// is closer), and from there ↑ comes back to the room just left, for ever.
+test('arrowPath: the way tmux walks it, never swinging back and forth', () => {
+  const s = T.createSession({ name: 't', baseIndex: 0, paneBaseIndex: 0 });
+  const win = T.createWindow(s, 'zsh');
+  T.selectWindow(s, win.id);
+  const goal = win.active;
+  const wide = T.splitPane(win, goal, 'tb', null, false).id;
+  T.selectPane(win, goal);
+  const mid = T.splitPane(win, goal, 'lr', null, false).id;
+  const right = T.splitPane(win, mid, 'lr', null, false).id;
+  T.resizePane(win, goal, 'lr', 12, COLS, ROWS);
+  assert.equal(win.active, right);
+  assert.equal(T.arrowPath(win, COLS, ROWS, goal), 'L', 'two ← rather than ↓ ↑ ↓ ↑');
+  // After ↓ for real, ↑ is the only way back up (to the room just left), then ←.
+  T.selectPane(win, T.neighbour(win, COLS, ROWS, 'D', true).id);
+  assert.equal(win.active, wide);
+  assert.equal(T.arrowPath(win, COLS, ROWS, goal), 'U');
+  T.selectPane(win, T.neighbour(win, COLS, ROWS, 'U', true).id);
+  assert.equal(win.active, right, 'tmux goes back to the most recently active room');
+  assert.equal(T.arrowPath(win, COLS, ROWS, goal), 'L');
+  assert.equal(T.arrowPath(win, COLS, ROWS, 'nope'), null, 'no such room: no way');
+  // neighbour asked from another room, with the room that would be most recent.
+  assert.equal(T.neighbour(win, COLS, ROWS, 'U', true, wide, mid).id, mid);
+  assert.equal(T.neighbour(win, COLS, ROWS, 'U', true, wide, goal).id, goal);
+});

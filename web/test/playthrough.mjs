@@ -2327,6 +2327,154 @@ async function loop10(browser) {
   await en.close();
 }
 
+// Round 11: robustness. A broken or huge store never breaks the title; the
+// guide leads back from a detour (another window before rename, another
+// pane before the trident, the top of the history before a copy); a
+// server that never answers does not leave 読み込み中 on screen for ever.
+async function loop11(browser) {
+  const L = '[loop11]';
+  const prefix = 'Control+b';
+  const okRun = (id, t) => ({ id, course: 'easy', ver: 2, at: '2026-10-2' + (id % 9) + 'T01:00:00Z', prefix: 'C-b', time: t, raw: t - 2, misses: 1, overs: 0, guides: 0, keys: 40, n: 15, rank: '初段', qs: [] });
+  const stores = [
+    ['a string', { 'tmux-da': '"hello"' }],
+    ['null', { 'tmux-da': 'null' }],
+    ['garbage runs and bests', { 'tmux-da': JSON.stringify({ schema: 4, arena: { 'tmux:easy': { time: 'x' }, 'tmux:hard': null }, runs: [null, 1, { course: 'easy' }, { id: 'c', course: 'easy', time: -5, at: 'yesterday', n: 15, qs: [{ t: 'zoom', s: 1 }] }, { id: 'd', course: 'normal', time: 50, at: '2026-10-22T01:00:00Z', n: 20, qs: 'abc' }] }) }],
+    ['runs without their bests', { 'tmux-da': JSON.stringify({ schema: 4, arena: {}, runs: [okRun(1, 70), okRun(2, 60), okRun(3, 65)] }) }],
+    ['broken net and lang', { 'tmux-da-net': JSON.stringify({ key: 123, name: { a: 1 }, syncedAt: 12 }), 'tmux-da-lang': '{"a":1}' }]
+  ];
+  for (const [name, store] of stores) {
+    const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+    await ctx.addInitScript((s) => { for (const k in s) localStorage.setItem(k, s[k]); }, store);
+    const page = await ctx.newPage();
+    const errors = watch(page);
+    await page.goto(PAGE);
+    ok(await page.$$eval('#course-list [data-course]', (l) => l.length) === 3, L + ' ' + name + ': the title shows the courses');
+    if (name === 'runs without their bests') {
+      ok(/60\.0/.test(await page.$eval('#course-list [data-course="easy"] .wing-best', (e) => e.textContent)), L + ' ' + name + ': the fastest run is the best');
+    }
+    await page.click('#btn-records');
+    ok(await page.evaluate(() => document.body.dataset.screen) === 'records', L + ' ' + name + ': the records open');
+    for (const tab of await page.$$('[data-rec-tab]')) await tab.click();
+    await page.keyboard.press('Escape');
+    await page.click('#course-list [data-course="easy"]');
+    await waitPlay(page);
+    ok(!!(await st(page)).run.next, L + ' ' + name + ': a run starts with a guide');
+    ok(errors.length === 0, L + ' ' + name + ': no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+    await ctx.close();
+  }
+
+  // The guide after a detour. Follows the guide, with a slip on the way at
+  // the first question of each kind, and must still solve it in a few steps.
+  const follow = async (page, i, max) => {
+    for (let step = 0; step < max; step++) {
+      const now = await st(page);
+      if (!now.run || now.run.i !== i) return step;
+      await followGuide(page, prefix);
+    }
+    return (await st(page)).run.i !== i ? max : -1;
+  };
+  const detours = {
+    rename: async (page, s) => {
+      const before = s.windows;
+      await page.keyboard.press(prefix); await page.keyboard.press('c');
+      const nx = (await st(page)).run.next;
+      ok(nx && nx.keys[0] !== ',', L + ' rename from another window: the guide goes back first (' + (nx && nx.text) + ')');
+      return async () => {
+        const after = (await st(page)).windows;
+        const target = before.find((w) => w.active);
+        const others = after.filter((w) => w.index !== target.index && before.some((b) => b.index === w.index && b.name !== w.name));
+        ok(others.length === 0, L + ' rename: no other window was renamed');
+      };
+    },
+    trident: async (page, s) => {
+      if (s.panes.length < 2) { await page.keyboard.press(prefix); await page.keyboard.press('"'); }
+      await page.keyboard.press(prefix); await page.keyboard.press('o');
+      const nx = (await st(page)).run.next;
+      ok(nx && /^[←→↑↓]$/.test(nx.keys[0]), L + ' trident from another pane: the guide goes back first (' + (nx && nx.text) + ')');
+    },
+    copy_page: async (page) => {
+      await page.keyboard.press(prefix); await page.keyboard.press('['); await page.keyboard.press('g');
+      const nx = (await st(page)).run.next;
+      ok(nx && nx.keys[0] === 'q', L + ' copy_page from the top of the history: q, not PageDown a hundred times (' + (nx && nx.text) + ')');
+    },
+    yank_paste: async (page) => {
+      await page.keyboard.press(prefix); await page.keyboard.press('['); await page.keyboard.press('g');
+      const now = await st(page), nx = now.run.next;
+      // A short history: ↓ a few times is right; a long one: q.
+      const near = now.copyAt && now.copyAt.lines - now.copyAt.ln <= 6;
+      ok(nx && (nx.keys[0] === 'q' || (near && nx.keys[0] === '↓')), L + ' yank_paste from the top of the history: q, not ↓ a hundred times (' + (nx && nx.text) + ')');
+    },
+    find_zoom: async (page) => {
+      // The pane the order names, alone in a window of its own: z would do nothing there.
+      await goTo(page, prefix);
+      await page.keyboard.press(prefix); await page.keyboard.press('!');
+      const now = await st(page);
+      ok(now.run.type === 'find_zoom' && now.run.next && now.run.next.keys[0] !== 'z', L + ' find_zoom with the pane broken out alone: asked again, not z (' + now.run.next.text + ')');
+    }
+  };
+  for (const id of ['normal', 'hard']) {
+    const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+    await setPlatform(ctx, 'mac');
+    const page = await ctx.newPage();
+    const errors = watch(page);
+    await page.goto(PAGE);
+    await page.click(`#course-list [data-course="${id}"]`);
+    await waitPlay(page);
+    const done = new Set();
+    let checked = 0;
+    for (let guard = 0; guard < 40; guard++) {
+      const s = await st(page);
+      if (!s.run || s.run.phase !== 'play') break;
+      const i = s.run.i, type = s.run.type;
+      let afterwards = null;
+      if (i === 1) {
+        // A tab switch and a window resize in the middle of a question.
+        await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+        const c1 = await page.$eval('#playbar .pb-time span', (e) => e.textContent);
+        await page.waitForTimeout(700);
+        const c2 = await page.$eval('#playbar .pb-time span', (e) => e.textContent);
+        ok((await st(page)).run.phase === 'pause' && c1 === c2, L + ' ' + id + ': a blur pauses the run and the clock stands still (' + c1 + ' → ' + c2 + ')');
+        await page.keyboard.press('Space');
+        ok((await st(page)).run.phase === 'play', L + ' ' + id + ': Space resumes');
+        await page.setViewportSize(PHONE);
+        await page.waitForTimeout(100);
+        ok(await page.evaluate(() => document.documentElement.scrollWidth) <= PHONE.width, L + ' ' + id + ': no horizontal scroll after a resize to a phone');
+        await page.setViewportSize(DESKTOP);
+        await page.waitForTimeout(100);
+      }
+      if (detours[type] && !done.has(type)) {
+        done.add(type); checked++;
+        afterwards = await detours[type](page, s);
+      }
+      const steps = await follow(page, i, 16);
+      ok(steps >= 0, L + ' ' + id + ' question ' + (i + 1) + ' (' + type + ') is solved by the guide' + (done.has(type) ? ' after the detour' : '') + (steps < 0 ? ': stuck at "' + ((await st(page)).run.next || {}).text + '"' : ''));
+      if (steps < 0) break;
+      if (afterwards) await afterwards();
+    }
+    ok(checked >= 2, L + ' ' + id + ': ' + checked + ' detours tried (' + [...done].join(' ') + ')');
+    await waitResult(page, L + ' ' + id);
+    ok(errors.length === 0, L + ' ' + id + ': no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+    await ctx.close();
+  }
+
+  // A server that never answers: the rankings say so after a while.
+  {
+    const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.route('**/v1/**', (route) => { setTimeout(() => route.abort().catch(() => {}), 30000); });
+    await page.goto(PAGE + '?api=http://127.0.0.1:1');
+    await page.click('#btn-board');
+    ok(/読み込み中/.test(await page.$eval('#records-body .board-body', (e) => e.textContent)), L + ' the board says it is loading');
+    await page.waitForFunction(() => !/読み込み中/.test(document.querySelector('#records-body .board-body').textContent), null, { timeout: 14000 }).catch(() => {});
+    const text = await page.$eval('#records-body .board-body', (e) => e.textContent.trim());
+    ok(/つながらなかった/.test(text), L + ' a server that never answers: the board gives up and says so (' + text + ')');
+    ok(errors.length === 0, L + ' no page errors with the server hanging' + (errors.length ? ': ' + errors.join(' | ') : ''));
+    await ctx.close();
+  }
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -2364,6 +2512,7 @@ const parts = [
   ['loop8', loop8],
   ['loop9', loop9],
   ['loop10', loop10],
+  ['loop11', loop11],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
