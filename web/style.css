@@ -981,6 +981,10 @@ body[data-armed="1"] .yashiki .term { box-shadow: none; }
 .em-overkeys ul { margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .em-overkeys li span { font-family: var(--mono); color: var(--sumi-dim); margin-left: 6px; }
 .em-watch { margin: 12px 0 0; }
+.watch-link { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 4px 0 0; font-size: 12.5px; }
+.watch-link a { color: var(--ai); overflow-wrap: anywhere; }
+.watch-link .btn { padding: 2px 10px; font-size: 12.5px; }
+.watch-link .watch-msg { color: var(--sumi-dim); }
 
 /* a published .tmux.conf, read-only */
 .conf-view { font-family: var(--mono); font-size: 12.5px; line-height: 1.5; background: var(--washi-3); color: var(--sumi); border: 1px solid var(--paper-line); padding: 10px 12px; max-height: 50vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 10px; }

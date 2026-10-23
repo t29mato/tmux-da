@@ -2992,7 +2992,16 @@ async function ghost(browser) {
     await page.waitForFunction(() => window.tmuxDa.state().replay, null, { timeout: 5000 });
     await page.keyboard.press('Escape');
     ok((await st(page)).screen === 'records', L + tag + ' Esc from a replay opened in the records goes back there');
-    ok(errors.length === 0, L + tag + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+    // A result not on the boards shares the site link, not a watch link.
+    await page.keyboard.press('Escape');
+    await page.click('#btn-records-back');
+    const share = await page.$eval('#result-body .share-text', (e) => e.textContent).catch(() => '');
+    ok(share.indexOf('?watch=') < 0 && share.indexOf('tmux-dojo/') >= 0 && await page.$('#result-body .watch-link') === null, L + tag + ' an unranked run shares the plain site link, no watch link');
+    // A ?watch= link opened away from the site (file://, no server): the title, nothing fetched.
+    await page.goto(PAGE + '?watch=r_abc123' + (tag === 'phone' ? '&lang=en' : ''));
+    await page.waitForTimeout(800);
+    ok((await st(page)).screen === 'title' && !(await st(page)).replay, L + tag + ' ?watch= with no server reachable stays on the title');
+    ok(errors.length === 0, L + tag + ' no page errors, nothing fetched' + (errors.length ? ': ' + errors.join(' | ') : ''));
     await ctx.close();
   }
 }

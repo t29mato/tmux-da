@@ -119,6 +119,11 @@
     return call('GET', '/v1/ghost?course=' + encodeURIComponent(course) + '&span=' + encodeURIComponent(span) + q).then(function (j) { return j.ghost; });
   }
 
+  // A ranked run by its id, to watch from a shared link (404: none).
+  function replay(id) {
+    return call('GET', '/v1/replay?id=' + encodeURIComponent(id));
+  }
+
   // A player's published .tmux.conf (404: none).
   function conf(name) {
     return call('GET', '/v1/conf?name=' + encodeURIComponent(name));
@@ -156,6 +161,6 @@
   window.ADV = window.ADV || {};
   window.ADV.net = {
     API: API, state: state, save: save, sync: sync, useKey: useKey, setName: setName,
-    submit: submit, board: board, ghost: ghost, conf: conf, setConf: setConf, forget: forget, ev: ev
+    submit: submit, board: board, ghost: ghost, replay: replay, conf: conf, setConf: setConf, forget: forget, ev: ev
   };
 })();
