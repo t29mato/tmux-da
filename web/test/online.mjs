@@ -136,8 +136,146 @@ const myRow = await D.page.$$eval('.rec-table.board tbody tr', (trs, n) => {
 ok(myRow && myRow.own && /18\.0秒/.test(myRow.text) && /自分の設定/.test(myRow.text), 'D: the own-config best shows with its mark: ' + (myRow && myRow.text));
 if (SHOTS) await D.page.screenshot({ path: SHOTS + '/online-board-own.png', fullPage: true });
 
+
+// ---- ghost race, replay, shared configs ------------------------------------
+const ARROW = { '←': 'ArrowLeft', '→': 'ArrowRight', '↑': 'ArrowUp', '↓': 'ArrowDown' };
+const state = (page) => page.evaluate(() => window.tmuxDa.state());
+// A run by the guide at a hand's pace, on `prefix`: the result enters the board with its keys.
+const playByGuide = async (page, course, prefix, pace = [260, 500]) => {
+  await page.click('#course-list [data-course="' + course + '"]');
+  await page.waitForFunction(() => { const r = window.tmuxDa.state().run; return r && r.phase === 'play'; }, null, { timeout: 15000 });
+  for (let guard = 0; guard < 200; guard++) {
+    const s = await state(page);
+    if (!s.run) break;
+    if (s.run.phase !== 'play') { await page.waitForTimeout(30); continue; }
+    // Reading the order: the server wants at least 0.4 s a question on average.
+    await page.waitForTimeout(pace[0] + Math.random() * (pace[1] - pace[0]));
+    const mv = s.run.next;
+    if (!mv) continue;
+    // A hand: the prefix, a moment, the key.
+    if (mv.pfx) { await page.keyboard.press(prefix); await page.waitForTimeout(40 + Math.random() * 100); }
+    if (mv.type) { await page.keyboard.type(mv.type, { delay: 70 }); await page.keyboard.press('Enter'); continue; }
+    if (!mv.keys.length) { await page.keyboard.press('Control+u'); await page.keyboard.type(s.run.goal, { delay: 70 }); await page.keyboard.press('Enter'); continue; }
+    await page.keyboard.press(ARROW[mv.keys[0]] || mv.keys[0]);
+  }
+  await page.waitForFunction(() => window.tmuxDa.state().screen === 'result', null, { timeout: 15000 });
+  await page.waitForFunction(() => { const r = window.tmuxDa.state().result; return r.board && r.board.state !== 'sending'; }, null, { timeout: 15000 });
+  return (await state(page)).result;
+};
+
+// A plays for real: the run goes up with its key log and is the ghost of others.
+await A.page.click('#btn-records-back');
+await A.page.click('#btn-records-back').catch(() => {});
+await A.page.evaluate(() => document.querySelector('.to-title') && document.querySelector('.to-title').click());
+await A.page.waitForFunction(() => window.tmuxDa.state().screen === 'title');
+// Slower than the own-config run below, so that one is A's best (the mark with the link).
+const ra = await playByGuide(A.page, 'easy', 'Control+b', [600, 900]);
+ok(ra.board.state === 'ok', 'A: a run played by hand enters the board (' + JSON.stringify(ra.board) + ')');
+if (ra.board.state !== 'ok') process.exit(1);
+ok(ra.qlog.every((q) => typeof q.p === 'number'), 'A: every question has its fewest keys on the result');
+
+// E: a fresh device races today's #1 (A) and sees its keys.
+const E = await open();
+ok(await E.page.$eval('#ghost-pick [data-ghost="top"]', (b) => b.getAttribute('aria-pressed')) === 'true', 'E: 今日の 1 位 is the ghost by default');
+await E.page.click('#course-list [data-course="easy"]');
+await E.page.waitForFunction(() => { const s = window.tmuxDa.state(); return s.ghost && s.ghost.today && s.run && s.run.phase === 'play'; }, null, { timeout: 10000 });
+let eg = (await state(E.page)).ghost;
+ok(eg.name === name && eg.keys === ra.keys, 'E: the ghost is A with its ' + eg.keys + ' keys');
+await E.page.waitForTimeout(1500);
+const strip = await E.page.$eval('#ghostbar', (e) => ({ t: e.textContent, kbd: e.querySelectorAll('kbd').length }));
+ok(strip.t.indexOf(name) >= 0 && /問題/.test(strip.t) && strip.kbd >= 1, 'E: the strip shows A\'s question and keys: ' + strip.t);
+if (SHOTS) await E.page.screenshot({ path: SHOTS + '/online-ghost-strip.png' });
+await E.page.keyboard.press('Escape'); await E.page.keyboard.press('Escape');
+await E.page.waitForFunction(() => window.tmuxDa.state().screen === 'title');
+
+// E: 1 つ上の人 — the slowest run on today's board faster than E's own best (45 s).
+await E.page.click('#ghost-pick [data-ghost="next"]');
+await E.page.evaluate((r) => ADV.records.add(r), fakeRun(3.0));
+await E.page.click('#course-list [data-course="easy"]');
+await E.page.waitForFunction(() => { const s = window.tmuxDa.state(); return s.ghost && s.ghost.today; }, null, { timeout: 10000 }).catch(() => {});
+const bg = (await state(E.page)).ghost;
+ok(bg && bg.kind === 'next' && bg.time < 45 && bg.name === name, 'E: 1 つ上の人 is the slowest run faster than its best 45 s: ' + JSON.stringify(bg));
+// (Esc is swallowed during the countdown.)
+await E.page.waitForFunction(() => { const r = window.tmuxDa.state().run; return r && r.phase === 'play'; }, null, { timeout: 10000 });
+await E.page.keyboard.press('Escape'); await E.page.keyboard.press('Escape');
+await E.page.waitForFunction(() => window.tmuxDa.state().screen === 'title');
+
+// E: この回を見る from the board: the keys per question, then the replay.
+await E.page.click('#btn-board');
+await E.page.waitForSelector('.rec-table.board tbody tr');
+const watchLink = await E.page.$('.rec-table.board [data-watch="' + name + '"]');
+ok(!!watchLink, 'E: A\'s row offers 見る');
+await watchLink.click();
+await E.page.waitForSelector('.rec-table.keylist tbody tr');
+const rows = await E.page.$$eval('.rec-table.keylist tbody tr', (trs) => trs.length);
+ok(rows === 15, 'E: the watch view lists the 15 questions with their keys');
+if (SHOTS) await E.page.screenshot({ path: SHOTS + '/online-watch.png', fullPage: true });
+await E.page.click('[data-replay-watch]');
+await E.page.waitForFunction(() => window.tmuxDa.state().replay, null, { timeout: 5000 });
+await E.page.waitForTimeout(1500);
+const rp = (await state(E.page)).replay;
+ok(rp.who === name && rp.playing && rp.i > 0 && !rp.lost, 'E: A\'s run replays on the house (' + rp.i + '/' + rp.n + ' keys fed)');
+if (SHOTS) await E.page.screenshot({ path: SHOTS + '/online-replay.png' });
+await E.page.keyboard.press('Escape');
+ok((await state(E.page)).screen === 'records', 'E: Esc goes back to the records');
+
+// A publishes the .tmux.conf it plays on: the exact text, after the warning.
+const CONF = 'set -g prefix C-a\nbind | split-window -h\nbind - split-window -v\n';
+await A.page.click('#result-body [data-title]');
+await A.page.click('#conf-box summary');
+await A.page.fill('#conf-text', CONF);
+await A.page.click('#conf-apply');
+ok((await state(A.page)).conf && (await state(A.page)).conf.prefix === 'Ctrl+a', 'A: plays on its own file (prefix Ctrl+a)');
+const rc = await playByGuide(A.page, 'easy', 'Control+a');
+ok(rc.board.state === 'ok' && rc.conf === 1, 'A: the own-config run enters the board');
+ok(await A.page.$('#result-body [data-conf-share]') !== null, 'A: the result offers to publish the file');
+await A.page.click('#result-body [data-conf-share]');
+await A.page.waitForSelector('#conf-dialog[open]');
+ok(await A.page.$eval('#conf-preview', (e) => e.textContent) === CONF, 'A: the sheet shows the exact text that will be public');
+ok(/パス|ホスト/.test(await A.page.$eval('#conf-dialog .warn', (e) => e.textContent)), 'A: with the warning about paths and host names');
+if (SHOTS) await A.page.screenshot({ path: SHOTS + '/online-conf-dialog.png' });
+await A.page.click('#conf-publish');
+await A.page.waitForFunction(() => ADV.net.state().confShared === true, null, { timeout: 10000 });
+ok(/公開中/.test(await A.page.$eval('#result-body', (e) => e.textContent)), 'A: the result says the file is published');
+await A.page.click('#result-body [data-records]');
+await tab(A.page, 'sync');
+await A.page.waitForSelector('[data-conf-unshare]');
+ok(true, 'A: the 引き継ぎ tab shows the published file with 公開をやめる');
+if (SHOTS) await A.page.screenshot({ path: SHOTS + '/online-conf-sync.png', fullPage: true });
+
+// E reads it from the board and plays on it.
+await tab(E.page, 'board');
+await E.page.waitForSelector('.rec-table.board [data-conf-of="' + name + '"]');
+await E.page.click('.rec-table.board [data-conf-of="' + name + '"]');
+await E.page.waitForSelector('#records-body pre.conf-view');
+ok(await E.page.$eval('#records-body pre.conf-view', (e) => e.textContent) === CONF, 'E: 自分の設定 on A\'s row opens the file, read-only, as published');
+if (SHOTS) await E.page.screenshot({ path: SHOTS + '/online-conf-view.png', fullPage: true });
+E.page.once('dialog', (d) => d.accept());
+await E.page.click('[data-conf-use]');
+await E.page.waitForFunction(() => window.tmuxDa.state().screen === 'title');
+const ec = await state(E.page);
+ok(ec.conf && ec.conf.prefix === 'Ctrl+a' && (await E.page.$eval('#conf-text', (e) => e.value)) === CONF, 'E: この設定で遊ぶ loads it into キー設定 (prefix Ctrl+a)');
+// E's replay of A's own-config run uses the published file.
+await E.page.click('#btn-board');
+await E.page.waitForSelector('.rec-table.board [data-watch="' + name + '"]');
+await E.page.click('.rec-table.board [data-watch="' + name + '"]');
+await E.page.waitForSelector('[data-replay-watch]');
+await E.page.click('[data-replay-watch]');
+await E.page.waitForFunction(() => { const s = window.tmuxDa.state(); return s.replay && (s.replay.done || s.replay.lost || s.replay.i > 6); }, null, { timeout: 20000 });
+const rp2 = (await state(E.page)).replay;
+ok(!rp2.lost && (await state(E.page)).conf && (await state(E.page)).conf.prefix === 'Ctrl+a', 'E: A\'s own-config run replays on A\'s published file (' + rp2.i + ' keys, lost ' + rp2.lost + ')');
+await E.page.keyboard.press('Escape');
+
+// A takes the file down: the link goes.
+await A.page.click('[data-conf-unshare]');
+await A.page.waitForFunction(() => ADV.net.state().confShared === false, null, { timeout: 10000 });
+await E.page.click('[data-rec-tab="board"]');
+await E.page.evaluate(() => { window.tmuxDa && (document.querySelector('[data-span="week"]').click()); });
+await E.page.waitForSelector('.rec-table.board tbody tr');
+ok(await E.page.$('.rec-table.board [data-conf-of="' + name + '"]') === null, 'E: after 公開をやめる the board has no link to the file');
+
 // The unknown 合言葉 above is a 404 on purpose; anything else is a fault.
-const errs = A.errors.concat(B.errors, D.errors).filter((e) => !/status of 404/.test(e));
+const errs = A.errors.concat(B.errors, D.errors, E.errors).filter((e) => !/status of 404/.test(e));
 ok(errs.length === 0, 'no page errors' + (errs.length ? ': ' + errs.join(' | ') : ''));
 await browser.close();
 console.log(failed ? failed + ' FAILED' : 'all passed');

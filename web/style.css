@@ -977,6 +977,7 @@ body[data-armed="1"] .yashiki .term { box-shadow: none; }
 
 /* the result: the questions that took more keys than the fewest */
 .em-overkeys { margin-top: 12px; font-size: 13px; }
+.em-overkeys .ok-head { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; color: var(--sumi-dim); }
 .em-overkeys ul { margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .em-overkeys li span { font-family: var(--mono); color: var(--sumi-dim); margin-left: 6px; }
 .em-watch { margin: 12px 0 0; }
@@ -998,6 +999,6 @@ body[data-armed="1"] .yashiki .term { box-shadow: none; }
   .ghostbar { gap: 8px; font-size: 12px; margin-top: -2px; padding: 2px 0 4px; }
   .gb-ctl .btn { padding: 1px 7px; }
   .gb-keys kbd { font-size: 11px; }
-  .gb-state { display: none; }
+  .gb-state, .pb-who { display: none; }
   .records-body .ghost-pick .gp-l { flex-basis: 100%; }
 }

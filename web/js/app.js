@@ -2581,7 +2581,9 @@
     var own = REC.ghostOf(b.course.id);
     b.ghost = own;
     var mode = S.ghostPick;
-    if (mode === 'own' || !NET || b.shuffled || !(NET.state().key || /^https?:$/.test(location.protocol))) return;
+    // Reading a ghost sends nothing of the player's; from a file:// page
+    // only a local test server is asked, as with the boards.
+    if (mode === 'own' || !NET || b.shuffled || !(NET.state().key || /^https?:$/.test(location.protocol) || /^http:\/\/(localhost|127\.0\.0\.1)|-staging\./.test(NET.API))) return;
     NET.ghost(b.course.id, 'today', mode === 'next' && own ? { above: own.time } : null).then(function (g) {
       if (!g || S.run !== b || (g.splits || []).length !== b.qs.length) return;
       var me = NET.state().name;
@@ -3576,7 +3578,7 @@
     var key = [b.i, b.phase, b.misses, b.streak >= 3 ? b.streak : 0, b.ghost ? b.ghost.name : '', b.ghostDiff, S.replay ? 'r' : ''].join('|');
     if (el.dataset.key === key) return;
     el.dataset.key = key;
-    el.innerHTML = '<span class="pb-course">' + (S.replay ? '<span class="pb-replay">' + tx('再生') + '</span> ' + esc(S.replay.who) + ' ・ ' : '') + esc(b.course.title) + tx(' ・ 問題 ') + '<b>' + qCount(b, ' / ') + '</b></span>' +
+    el.innerHTML = '<span class="pb-course">' + (S.replay ? '<span class="pb-replay">' + tx('再生') + '</span> <span class="pb-who">' + esc(S.replay.who) + ' ・ </span>' : '') + esc(b.course.title) + tx(' ・ 問題 ') + '<b>' + qCount(b, ' / ') + '</b></span>' +
       (b.streak >= 3 ? '<span class="pb-streak">' + tx('{0} 連', b.streak) + '</span>' : '') +
       (S.conf ? '<span class="pb-conf">' + tx('自分のキー設定（prefix {0}）', prefixLabel()) + '</span>' : '') +
       '<span class="pb-sp"></span>' +
@@ -4653,7 +4655,7 @@
     var over = (r.qlog || []).filter(function (q) { return typeof q.p === 'number' && typeof q.k === 'number' && q.k > q.p; });
     if (!over.length) return '';
     over.sort(function (a, b) { return (b.k - b.p) - (a.k - a.p); });
-    return '<div class="em-overkeys"><div class="tips-head">' + tx('最短より多く押した問題') + '</div><ul>' +
+    return '<div class="em-overkeys"><div class="ok-head">' + tx('最短より多く押した問題') + '</div><ul>' +
       over.slice(0, 5).map(function (q) { return '<li>' + esc(typeName(q.t)) + ' <span>' + tx('押した {0} / 最短 {1}', q.k, q.p) + '</span></li>'; }).join('') + '</ul></div>';
   }
 
@@ -4758,7 +4760,8 @@
         r.board = res ? { state: 'ok', rank: res.rank, total: res.total } : { state: 'off' };
       });
     }).catch(function (e) {
-      r.board = { state: e && e.status === 400 && NET.state().name ? 'refused' : 'offline' };
+      // The server's reason (key log: …) is kept for the tests and the console.
+      r.board = { state: e && e.status === 400 && NET.state().name ? 'refused' : 'offline', why: e && e.message };
     }).then(function () { if (S.screen === 'result' && S.result === r) renderResult(); });
   }
 
