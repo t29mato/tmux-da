@@ -47,6 +47,21 @@ test('rankMul: the same hands land on about the same Lv and title on every cours
   assert.equal(LV.levelFor(5.2), 9, 'a beginner reading the 手順 is well off Lv 1');
 });
 
+test('nextRank: the title a course time holds, the next one and the seconds it needs', () => {
+  const easy = LV.COURSES[0], hard = LV.COURSES[2];
+  const r = plain(LV.nextRank(easy, 89.6));
+  assert.equal(r.rank, '初段');
+  assert.equal(r.next, '三段');
+  assert.equal(r.need, 75, '5 秒 × 15 問');
+  assert.equal(+r.gap.toFixed(1), 14.6);
+  assert.deepEqual(plain(LV.nextRank(easy, 20)), { rank: '師範', next: null, need: null, gap: null }, 'nothing above 師範');
+  const h = plain(LV.nextRank(hard, 100));
+  assert.equal(h.rank, '三段');
+  assert.equal(h.next, '師範代');
+  assert.equal(+h.need.toFixed(1), 76.8, '3 秒 × 1.6 × 16 問');
+  assert.equal(plain(LV.nextRank(easy, 40, 10)).rank, '三段', 'n overrides the count');
+});
+
 test('par (お手本) is 師範代 pace on every question', () => {
   assert.deepEqual(plain(LV.COURSES.map((c) => LV.par(c))), [45, 75, 77]);
   assert.equal(LV.par(LV.KEIKO, 9), 35, 'the 稽古の間 counts the questions it picked');
