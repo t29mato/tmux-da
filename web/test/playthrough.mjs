@@ -973,6 +973,74 @@ async function records(browser) {
   await ctx2.close();
 }
 
+// Speed and launch readiness: the link preview (og:) in both languages,
+// the icons beside the page, and the hot path: a key that changes nothing
+// in a pane leaves its DOM alone (no re-parse, no layout), while the copy
+// cursor is still drawn right after a page move.
+async function loop14(browser) {
+  const L = '[loop14]';
+  const web = path.resolve(HERE, '..');
+  ok(fs.existsSync(path.join(web, 'og.png')) && fs.statSync(path.join(web, 'og.png')).size < 150000, L + ' og.png is beside the page and small');
+  ok(fs.existsSync(path.join(web, 'apple-touch-icon.png')), L + ' apple-touch-icon.png is beside the page');
+  const meta = (page) => page.evaluate(() => {
+    const m = (sel) => (document.querySelector(sel) || {}).getAttribute?.('content') || '';
+    return { lang: document.documentElement.lang, title: document.title, desc: m('meta[name="description"]'), ogt: m('meta[property="og:title"]'), ogd: m('meta[property="og:description"]'), ogi: m('meta[property="og:image"]'), loc: m('meta[property="og:locale"]'), card: m('meta[name="twitter:card"]'), tt: m('meta[name="twitter:title"]') };
+  });
+  for (const [locale, want] of [['ja-JP', { lang: 'ja', title: 'tmux 道場', loc: 'ja_JP', desc: /^tmux のキー操作を/ }], ['en-US', { lang: 'en', title: 'tmux Dojo', loc: 'en_US', desc: /^A time attack/ }]]) {
+    const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce', locale });
+    const page = await ctx.newPage();
+    const errors = watch(page);
+    await page.goto(PAGE);
+    const m = await meta(page);
+    ok(m.lang === want.lang && m.title === want.title, L + ' ' + locale + ': <html lang> and the title follow the language (' + m.lang + ', ' + m.title + ')');
+    ok(m.ogt === want.title && m.tt === want.title && want.desc.test(m.ogd) && want.desc.test(m.desc) && m.loc === want.loc, L + ' ' + locale + ': og:title, og:description, twitter:title and og:locale follow it');
+    ok(/^https:\/\/t29mato\.github\.io\/games\/tmux-dojo\/og\.png$/.test(m.ogi) && m.card === 'summary_large_image', L + ' ' + locale + ': the preview image is an absolute URL and the card is large');
+    ok(errors.length === 0, L + ' ' + locale + ': no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+    await ctx.close();
+  }
+
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  // A mark on the live DOM: it survives only if the node is not rebuilt.
+  const mark = () => page.evaluate(() => {
+    document.querySelector('#term .pane.active .pane-body .sh-line').dataset.probe = '1';
+    const w = document.querySelector('#status .st-wins');
+    if (w) w.dataset.probe = '1';
+  });
+  const marks = () => page.evaluate(() => [!!document.querySelector('#term .pane.active .pane-body .sh-line[data-probe]'), !!document.querySelector('#status .st-wins[data-probe]')]);
+  await mark();
+  await page.keyboard.press('Control+b');
+  let m = await marks();
+  ok(m[0] === true, L + ' the prefix changes nothing in the pane: its body is left as it is');
+  ok(m[1] === false && (await page.$eval('#status', (e) => e.textContent)).includes('PREFIX'), L + ' the status bar is redrawn when it changes (PREFIX)');
+  await page.keyboard.press('Escape');
+  await mark();
+  await page.keyboard.press('a');
+  m = await marks();
+  ok(m[0] === false && (await page.$eval('#term .pane.active .pane-body', (e) => e.textContent)).includes('a'), L + ' a typed letter redraws the pane body');
+  // Copy mode with a scrollback: the cursor cell is drawn after a page move too.
+  await page.keyboard.press('Control+u');
+  await page.keyboard.type('cat makimono.txt'); await page.keyboard.press('Enter');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('[');
+  const cm = await st(page, true);
+  ok(cm.copyMode === true && cm.copyAt.lines > 20, L + ' copy mode opens on a scrollback (' + (cm.copyAt || {}).lines + ' lines)');
+  const cursors = () => page.$$eval('#term .pane.active .pane-body span.cursor', (l) => l.length);
+  const curLine = () => page.evaluate(() => { const s = window.tmuxDa.state(); const l = document.querySelector('#term .pane.active .pane-body .sh-line.cl'); return l && +l.dataset.ln === s.copyAt.ln; });
+  for (const k of ['ArrowUp', 'PageUp', 'ArrowDown', 'PageUp', 'PageUp', 'ArrowUp', 'PageDown']) {
+    await page.keyboard.press(k);
+    const n = await cursors();
+    if (n !== 1 || !(await curLine())) { ok(false, L + ' after ' + k + ': one cursor cell on the cursor line (' + n + ' cells)'); break; }
+  }
+  ok((await cursors()) === 1 && (await curLine()), L + ' the copy cursor is drawn once, on its line, through page moves');
+  await page.keyboard.press('q');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // The music and the effects: every voice of a tune the same length, real
 // notes only, and nothing silent or clipping.
 async function sound(browser) {
@@ -2531,6 +2599,7 @@ const parts = [
   ['loop9', loop9],
   ['loop10', loop10],
   ['loop11', loop11],
+  ['loop14', loop14],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
