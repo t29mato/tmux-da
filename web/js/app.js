@@ -1489,6 +1489,8 @@
   // message, note, chip and banner take Japanese and show it in the page's
   // language (`raw`: the player's own text, as it is).
   function message(text, raw) {
+    // Tried on (parKeys): nothing to say, and no timer that would clear a real one.
+    if (S.sim) return;
     S.message = raw ? text : tx(text);
     clearTimeout(S.messageTimer);
     // The tabs are back: the arrow to a wanted tab too.
@@ -2588,7 +2590,7 @@
       if (!g || S.run !== b || (g.splits || []).length !== b.qs.length) return;
       var me = NET.state().name;
       if (me && g.name === me) return;
-      b.ghost = { name: g.name, time: g.time, splits: g.splits, keys: g.keys || null, today: true, kind: mode === 'next' ? 'next' : 'top' };
+      b.ghost = { name: g.name, time: g.time, splits: g.splits, keys: g.keys || null, today: true, kind: mode === 'next' && own ? 'next' : 'top' };
       prepGhost(b);
       $('#playbar').dataset.key = '';
       if (S.screen === 'game') renderPlaybar();
@@ -5067,7 +5069,7 @@
     else {
       html += '<p class="rec-empty">' + tx('{0}秒 ・ 押したキー {1}', run.time.toFixed(1), run.keys) + (run.conf ? tx(' ・ 自分の設定') : '') + '</p>' +
         '<div class="cta">' + (can ? '<button type="button" class="btn primary" data-replay-watch="1">' + tx('再生する') + '</button>'
-          : '<span class="rec-empty">' + tx(run.conf && !run.shared ? 'この人の設定は公開されていないので、再生はできない（キーの一覧だけ）。' : '再生はできない（キーの一覧だけ）。') + '</span>') +
+          : '<span class="rec-empty">' + tx(run.mine ? 'この回のキー設定と今の設定が違うので、再生はできない（キーの一覧だけ）。' : run.conf && !run.shared ? 'この人の設定は公開されていないので、再生はできない（キーの一覧だけ）。' : '再生はできない（キーの一覧だけ）。') + '</span>') +
         '<button type="button" class="btn ghost" data-rec-tab="board">' + tx('ランキングへ戻る') + '</button></div>' +
         keyListHTML(run);
     }

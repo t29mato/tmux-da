@@ -829,4 +829,5 @@ window.ADV.EN = {
   "下の文がそのまま公開される。パスやホスト名、ユーザー名が入っていれば、それも誰でも読める。何も削らずに送るので、先に確かめて。": "The text below is published exactly as it is. Any paths, host names or user names in it become readable by anyone. Nothing is stripped, so check it first.",
   "公開する": "Publish",
   "見る": "Watch",
+  "この回のキー設定と今の設定が違うので、再生はできない（キーの一覧だけ）。": "This run was played on a different key config than the current one, so it cannot be replayed (the key list only).",
 };

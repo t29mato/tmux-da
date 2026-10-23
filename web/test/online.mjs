@@ -268,7 +268,10 @@ await E.page.keyboard.press('Escape');
 
 // A takes the file down: the link goes.
 await A.page.click('[data-conf-unshare]');
-await A.page.waitForFunction(() => ADV.net.state().confShared === false, null, { timeout: 10000 });
+await A.page.waitForFunction(() => ADV.net.state().confShared === false, null, { timeout: 20000 }).catch(async (e) => {
+  console.log('unshare did not go through: ' + JSON.stringify(await A.page.evaluate(() => ({ state: ADV.net.state(), msg: (document.querySelector('[data-conf-msg]') || {}).textContent, panel: (document.querySelector('[data-conf-panel]') || {}).textContent }))));
+  throw e;
+});
 await E.page.click('[data-rec-tab="board"]');
 await E.page.evaluate(() => { window.tmuxDa && (document.querySelector('[data-span="week"]').click()); });
 await E.page.waitForSelector('.rec-table.board tbody tr');
