@@ -52,6 +52,9 @@ export function cleanRun(r) {
   if (!COURSES[r.course] && !PRACTICE.includes(r.course)) return null;
   if (typeof r.time !== 'number' || !(r.time > 0) || r.time > 36000) return null;
   if (typeof r.at !== 'string' || r.at.length > 40 || isNaN(Date.parse(r.at))) return null;
+  // The key log is for the boards (keylogs), not the history: it would make
+  // the history many times its size.
+  if (r.klog !== undefined) { r = { ...r }; delete r.klog; }
   const body = JSON.stringify(r);
   return body.length > 8000 ? null : { id: r.id, course: r.course, at: r.at, body };
 }
@@ -137,4 +140,54 @@ export function checkRun(run, now = new Date()) {
   if (!(run.qs.reduce((a, q) => a + q.s, 0) >= MIN_AVG * n)) throw new Fail(400, 'too fast');
   if (typeof run.time !== 'number' || Math.abs(sum - run.time) > 0.05 * n + 0.2) throw new Fail(400, 'time does not add up');
   return { n, splits, time: +run.time.toFixed(2), own: run.conf ? 1 : 0 };
+}
+
+// ---- the key log ------------------------------------------------------------
+// A run may carry what was pressed: `klog: { keys: [[ms, label], ...], q:
+// [ms, ...], cut? }`, ms from the run's start (the clock, without penalties),
+// `q` the start of each question. It must agree with the run and look typed
+// by a hand: a script's keys come at once or on a fixed beat. A run with no
+// log (an older client) is taken as before.
+export const LOG_MAX = 1500;
+export const LOG_LABEL_MAX = 24;
+// Two keys closer than this (ms) are not two presses of a hand.
+export const LOG_MIN_GAP = 15;
+// Checked against the log only when it holds at least this many keys.
+const LOG_FEW = 8;
+
+function logFail(why) { throw new Fail(400, 'key log: ' + why); }
+
+export function checkLog(run) {
+  const g = run.klog;
+  if (g == null) return null;
+  const n = run.qs.length;
+  if (typeof g !== 'object' || !Array.isArray(g.keys) || !Array.isArray(g.q)) logFail('bad shape');
+  if (g.keys.length > LOG_MAX || g.q.length !== n) logFail('bad length');
+  let prev = 0;
+  for (const e of g.keys) {
+    if (!Array.isArray(e) || !Number.isInteger(e[0]) || e[0] < prev || typeof e[1] !== 'string' || !e[1] || e[1].length > LOG_LABEL_MAX) logFail('bad entry');
+    prev = e[0];
+  }
+  prev = 0;
+  for (const t of g.q) { if (!Number.isInteger(t) || t < prev) logFail('bad boundary'); prev = t; }
+  const cut = !!g.cut;
+  if (g.keys.length < n) logFail('too few keys');
+  if (!cut && Number.isInteger(run.keys) && run.keys !== g.keys.length) logFail('key count');
+  // The last key solved the last question: it comes at the clock's end.
+  const raw = run.qs.reduce((a, q) => a + q.s, 0);
+  const last = g.keys[g.keys.length - 1][0] / 1000;
+  if (!cut && Math.abs(last - raw) > 0.5 + 0.02 * n) logFail('last key time');
+  // Each question's start is the one before plus its seconds.
+  for (let i = 1; i < n; i++) {
+    if (Math.abs((g.q[i] - g.q[i - 1]) / 1000 - run.qs[i - 1].s) > 0.4) logFail('question boundaries');
+  }
+  const gaps = [];
+  for (let i = 1; i < g.keys.length; i++) gaps.push(g.keys[i][0] - g.keys[i - 1][0]);
+  if (gaps.length >= LOG_FEW) {
+    const fast = gaps.filter((d) => d < LOG_MIN_GAP).length;
+    if (fast / gaps.length > 0.3) logFail('intervals too short');
+    const lo = Math.min(...gaps), hi = Math.max(...gaps);
+    if (hi - lo < 5) logFail('intervals identical');
+  }
+  return { keys: g.keys, q: g.q, cut };
 }

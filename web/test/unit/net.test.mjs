@@ -118,3 +118,44 @@ test('state: a broken store is as if unset (round 11)', () => {
   const ADV = device(fakeServer(), memoryStorage({ 'tmux-da-net': JSON.stringify({ boards: false }) }));
   assert.equal(ADV.net.state().boards, false, 'a flag is kept');
 });
+
+// ---- key logs and the published .tmux.conf ----------------------------------
+test('sync leaves the key logs at home; the ranked run carries its log', async () => {
+  const server = fakeServer();
+  const bodies = [];
+  const inner = server.fetch;
+  server.fetch = async (url, opts) => { if (opts && opts.body) bodies.push([new URL(url).pathname, JSON.parse(opts.body)]); return inner(url, opts); };
+  const ADV = device(server);
+  ADV.records.add({ ...run(40), klog: { keys: [[0, 'Ctrl+b'], [150, '%']], q: [0] } });
+  await ADV.net.sync();
+  const synced = bodies.find((b) => b[0] === '/v1/sync')[1].runs;
+  assert.equal(synced.length, 1);
+  assert.equal(synced[0].klog, undefined, 'no log in the history sent up');
+  assert.ok(ADV.records.load().runs[0].klog, 'the log stays in the browser');
+  await ADV.net.setName('ねこ');
+  await ADV.net.submit(ADV.records.load().runs[0]);
+  const scored = bodies.find((b) => b[0] === '/v1/scores')[1].run;
+  assert.deepEqual(scored.klog.keys, [[0, 'Ctrl+b'], [150, '%']]);
+});
+
+test('ghost: the span, the next one up, a name; conf: publish and withdraw', async () => {
+  const urls = [];
+  const fetch = async (url, opts = {}) => {
+    urls.push(url);
+    const u = new URL(url);
+    const j = u.pathname === '/v1/ghost' ? { ghost: { name: 'x', time: 10, splits: [], keys: null } } : u.pathname === '/v1/conf' && opts.method === 'POST' ? { shared: JSON.parse(opts.body).text !== '' } : u.pathname === '/v1/keys' ? { key: 'kaze-matsu-tsuru-001' } : { name: 'y', text: 'bind x kill-pane' };
+    return { ok: true, status: 200, json: async () => j };
+  };
+  const ADV = load(['levels.js', 'records.js', 'net.js'], { fetch, search: '?api=http://localhost:8787' }).ADV;
+  await ADV.net.ghost('easy', 'today');
+  await ADV.net.ghost('easy', 'today', { above: 12.5 });
+  await ADV.net.ghost('hard', 'all', { name: 'たま ご' });
+  assert.equal(urls[0], 'http://localhost:8787/v1/ghost?course=easy&span=today');
+  assert.equal(urls[1], 'http://localhost:8787/v1/ghost?course=easy&span=today&above=12.5');
+  assert.equal(urls[2], 'http://localhost:8787/v1/ghost?course=hard&span=all&name=%E3%81%9F%E3%81%BE%20%E3%81%94');
+  assert.equal((await ADV.net.conf('y')).text, 'bind x kill-pane');
+  assert.equal(await ADV.net.setConf('set -g prefix C-a'), true);
+  assert.equal(ADV.net.state().confShared, true);
+  assert.equal(await ADV.net.setConf(''), false);
+  assert.equal(ADV.net.state().confShared, false);
+});

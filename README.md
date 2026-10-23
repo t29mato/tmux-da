@@ -52,6 +52,22 @@ python3 -m http.server -d web 8000       # または http://localhost:8000/
 
 ランキングと引き継ぎのための小さな API。Cloudflare Workers ＋ D1（SQLite）。アカウントは無く、合言葉は SHA-256 だけを保存する。記録の検証（1 問あたり平均 0.4 秒未満、1 問 0.1 秒未満、合計が合わない記録、その日の出題順でない記録、途中で長く止まった記録、順番を変えた回は弾く）と、アドレスごとの回数制限（分ごと、合言葉の新規作成は日ごとも）をする。自分の .tmux.conf で遊んだ記録はランキングに「自分の設定」と出る。名前は見えない文字を落とし、制御文字や積み重ねたアクセントを弾く。
 
+ランキングに載せる記録には、押したキーの記録（`klog`: キーごとの ms と表示名、問題ごとの開始 ms）が付く（`keylogs` 表）。サーバはそれが記録と合うか（キーの数、最後のキーの時刻 ≈ タイム、問題の切れ目 ≈ 各問の秒）と、人の手らしいか（間隔が 15 ms 未満のキーが 3 割を超える、間隔が全部同じ）を見て、合わなければ 400 で理由（`key log: …`）を返す。古いクライアントのキー記録なしの記録はこれまでどおり受ける。キー記録は影（`/v1/ghost` の `above=` で 1 つ上の人、`name=` でその人のベスト）と「この回を見る」（再生）に使う。名前のある人は遊んでいる .tmux.conf を公開できる（`/v1/conf`、8 KB まで、そのまま保存。`confs` 表）。ランキングの「自分の設定」がそのリンクになる。
+
+`keylogs` と `confs` の表は Worker が初回に自分で作るが、本番のデプロイ前に手で作っておくのが確実（既存のデータには触らない）:
+
+```bash
+cd server
+npx wrangler d1 execute tmux-da --remote --command "CREATE TABLE IF NOT EXISTS keylogs (key_hash TEXT NOT NULL, run_id TEXT NOT NULL, log TEXT NOT NULL, PRIMARY KEY (key_hash, run_id))"
+npx wrangler d1 execute tmux-da --remote --command "CREATE TABLE IF NOT EXISTS confs (key_hash TEXT PRIMARY KEY, text TEXT NOT NULL, at TEXT NOT NULL)"
+```
+
+公開された設定を消すには（本人が消せない事情のとき）:
+
+```bash
+npx wrangler d1 execute tmux-da --remote --command "DELETE FROM confs WHERE key_hash = (SELECT key_hash FROM players WHERE name = 'その名前')"
+```
+
 ```bash
 cd server
 npx wrangler d1 execute tmux-da --remote --file schema.sql   # 表を作る（初回だけ）
@@ -90,7 +106,7 @@ scripts/test.sh game # unit | game | online | cli のどれか 1 つ
 | 種類 | 場所 | 中身 |
 |---|---|---|
 | 単体 | `web/test/unit/` | コースと称号、記録（追加・移行・端末の合流・影・苦手）、通信（偽のサーバ相手） |
-| 単体＋API | `server/test/` | 合言葉・記録の検証規則、API 全体を Node 内蔵の SQLite 上で（同期・名前・ランキング・影・回数制限・CORS） |
+| 単体＋API | `server/test/` | 合言葉・記録の検証規則、キー記録の検証（Playwright で録った人の手の記録 `fixtures/keylogs.json` と、機械らしい記録）、API 全体を Node 内蔵の SQLite 上で（同期・名前・ランキング・影・公開設定・回数制限・CORS） |
 | 結合（ゲーム） | `web/test/playthrough.mjs` | 本物のキーボードイベントで 3 つのコースを通す。手順だけで全種類解けるか、問題の境で居場所と部屋が引き継がれるか、指示の文字が動かないか、飛ばないか、一時停止、行の編集、音 |
 | 結合（通信） | `web/test/online.mjs`, `server/smoke.mjs` | `wrangler dev --local` を立て、ブラウザ 2 つを 2 台の端末に見立てて同期・ランキング・影を通す |
 | CLI 版 | `test/playthrough.sh` | 下を参照 |

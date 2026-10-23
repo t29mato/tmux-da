@@ -140,3 +140,75 @@ test('jstDay rolls over at midnight in Japan', () => {
   assert.equal(jstDay(new Date('2026-10-20T14:59:59Z')), '2026-10-20');
   assert.equal(jstDay(new Date('2026-10-20T15:00:00Z')), '2026-10-21');
 });
+
+// ---- the key log ----------------------------------------------------------
+// Three runs a hand played by the guide (recorded with Playwright at an
+// expert, a steady and a slow pace: fixtures/keylogs.json), and the ways a
+// script's log gives itself away.
+import fs from 'node:fs';
+import { checkLog, LOG_MAX } from '../src/rules.js';
+const FIX = JSON.parse(fs.readFileSync(new URL('./fixtures/keylogs.json', import.meta.url), 'utf8'));
+const withLog = (name, patch) => {
+  const r = JSON.parse(JSON.stringify(FIX[name]));
+  return patch ? patch(r) || r : r;
+};
+
+test('checkLog: runs a hand played pass, at every pace', () => {
+  for (const name of Object.keys(FIX)) {
+    const r = FIX[name];
+    const c = checkLog(r);
+    assert.ok(c && c.keys.length === r.keys, name + ': ' + r.keys + ' keys');
+    assert.equal(c.cut, false);
+    assert.ok(r.time / r.n < 5, name + ' is a plausible pace');
+  }
+  assert.ok(FIX['easy-expert'].time / 15 < 0.6, 'the expert run is faster than 0.6 s a question and still accepted');
+});
+
+test('checkLog: no log (an older client) is accepted as before', () => {
+  assert.equal(checkLog(withLog('easy-expert', (r) => { delete r.klog; })), null);
+});
+
+test('checkLog: the log must agree with the run', () => {
+  const fails = (patch, why) => assert.throws(() => checkLog(withLog('normal-steady', patch)), (e) => e.status === 400 && e.message.startsWith('key log: '), why);
+  fails((r) => { r.klog.keys.pop(); }, 'a key fewer than reported');
+  fails((r) => { r.keys += 3; }, 'more keys reported than logged');
+  fails((r) => { r.klog.keys.slice(-3).forEach((e) => { e[0] = r.klog.keys[5][0]; }); r.klog.keys.sort((a, b) => a[0] - b[0]); }, 'the last keys long before the end');
+  fails((r) => { r.klog.q[5] += 1500; }, 'a question boundary off its split');
+  fails((r) => { r.klog.q.pop(); }, 'a boundary missing');
+  fails((r) => { r.klog = { keys: 'x', q: [] }; }, 'not a list');
+  fails((r) => { r.klog.keys[3] = [r.klog.keys[3][0], '']; }, 'an empty label');
+  fails((r) => { r.klog.keys[3] = [r.klog.keys[2][0] - 10, 'x']; }, 'time going backwards');
+  fails((r) => { r.klog.keys = r.klog.keys.slice(0, 10); r.keys = 10; r.klog.cut = 1; }, 'fewer keys than questions even when cut');
+});
+
+test('checkLog: a cut log skips the counts but keeps the shape and the boundaries', () => {
+  const c = checkLog(withLog('hard-slow', (r) => { r.klog.cut = 1; r.keys = 999; }));
+  assert.equal(c.cut, true);
+  assert.throws(() => checkLog(withLog('hard-slow', (r) => { r.klog.cut = 1; r.klog.q[2] -= 2000; })));
+  assert.throws(() => checkLog(withLog('hard-slow', (r) => { r.klog.keys = Array.from({ length: LOG_MAX + 1 }, (_, i) => [i * 10, 'x']); r.klog.cut = 1; })));
+});
+
+test('checkLog: a script\'s hands are refused, a quick hand is not', () => {
+  const bot = (why, patch) => assert.throws(() => checkLog(withLog('easy-expert', patch)), (e) => e.status === 400 && e.message === 'key log: ' + why, why);
+  // Every key 5 ms after the one before: nothing is typed that fast.
+  bot('intervals too short', (r) => {
+    const end = r.klog.keys[r.klog.keys.length - 1][0];
+    r.klog.keys = r.klog.keys.map((e, i) => [Math.max(0, end - (r.klog.keys.length - 1 - i) * 5), e[1]]);
+    r.klog.q = r.klog.q.map((t, i) => (i ? end - (r.n - i) * 0.01 : 0) | 0);
+    r.qs = r.qs.map((q, i) => ({ ...q, s: i ? 0.01 : end / 1000 - 0.14 }));
+  });
+  // A metronome: the same gap between every key.
+  bot('intervals identical', (r) => {
+    const gap = 180, L = r.klog.keys.length, kq = Math.floor(L / r.n);
+    r.klog.keys = r.klog.keys.map((e, i) => [i * gap, e[1]]);
+    // The keys shared out evenly over the questions, the rest in the last.
+    r.klog.q = r.klog.q.map((t, i) => i * kq * gap);
+    r.qs = r.qs.map((q, i) => ({ ...q, s: (i === r.n - 1 ? L - (r.n - 1) * kq : kq) * gap / 1000 }));
+    r.time = +(L * gap / 1000).toFixed(2);
+  });
+  // A quick hand: 40–120 ms gaps, each a little different: fine.
+  const quick = withLog('easy-expert');
+  assert.ok(checkLog(quick));
+  const gaps = quick.klog.keys.slice(1).map((e, i) => e[0] - quick.klog.keys[i][0]);
+  assert.ok(Math.min(...gaps) >= 15, 'the recorded expert never pressed two keys within 15 ms (' + Math.min(...gaps) + ')');
+});

@@ -9,14 +9,20 @@
 //   POST /v1/name   { key, name }       → { name }           the name on the boards
 //   POST /v1/scores { key, run }        → { rank, total }    enter a run on the boards
 //   GET  /v1/board?course=&span=        → { rows }           today / week / all
-//   GET  /v1/ghost?course=&span=        → { name, time, splits } the run to race
+//   GET  /v1/ghost?course=&span=        → { name, time, splits, keys } the run to race
+//                  &above=<time>       …the slowest run faster than that (1 つ上の人)
+//                  &name=<name>        …that player's best (この回を見る)
+//   POST /v1/conf   { key, text }       → { shared }         publish (or, empty, withdraw) the .tmux.conf
+//   GET  /v1/conf?name=                 → { name, text, at } a published .tmux.conf
 //   POST /v1/ev     { v, e, c, n }      → 204                one step of a visit (counts only)
 //   GET  /v1/stats?days=                → { days }           the counts per day
 
-import { COURSES, VER, Fail, normalizeKey, cleanName, cleanRun, jstDay, checkRun } from './rules.js';
+import { COURSES, VER, Fail, normalizeKey, cleanName, cleanRun, jstDay, checkRun, checkLog } from './rules.js';
 
 const MAX_RUNS = 900, MAX_BODY = 600 * 1024;
-const LIMITS = { keys: 5, sync: 30, name: 10, scores: 20, ev: 60 };
+const LIMITS = { keys: 5, sync: 30, name: 10, scores: 20, ev: 60, conf: 10 };
+// A published .tmux.conf: at most this many bytes (UTF-8).
+const CONF_MAX = 8 * 1024;
 // Per address per day (UTC): a script making a name for every row of a board.
 const DAY_LIMITS = { keys: 40 };
 
@@ -74,8 +80,9 @@ async function route(req, env) {
   if (req.method === 'GET' && p === '/v1/board') return board(env, url.searchParams);
   if (req.method === 'GET' && p === '/v1/ghost') return ghost(env, url.searchParams);
   if (req.method === 'GET' && p === '/v1/stats') return stats(env, url.searchParams);
+  if (req.method === 'GET' && p === '/v1/conf') return getConf(env, url.searchParams);
   if (req.method !== 'POST') throw new Fail(404, 'not found');
-  const name = { '/v1/keys': 'keys', '/v1/sync': 'sync', '/v1/name': 'name', '/v1/scores': 'scores', '/v1/ev': 'ev' }[p];
+  const name = { '/v1/keys': 'keys', '/v1/sync': 'sync', '/v1/name': 'name', '/v1/scores': 'scores', '/v1/ev': 'ev', '/v1/conf': 'conf' }[p];
   if (!name) throw new Fail(404, 'not found');
   await limit(env, req, name);
   const text = await req.text();
@@ -89,6 +96,7 @@ async function route(req, env) {
   const hash = await player(env, body.key);
   if (name === 'sync') return sync(env, hash, body.runs);
   if (name === 'name') return setName(env, hash, body.name);
+  if (name === 'conf') return setConf(env, hash, body.text);
   return enter(env, hash, body.run);
 }
 
@@ -160,12 +168,15 @@ async function setName(env, hash, name) {
   return json({ name: n });
 }
 
-// scores.own (1: the player's own .tmux.conf) came after the first boards;
-// a database from before gets the column on first use.
+// scores.own (1: the player's own .tmux.conf) came after the first boards,
+// the key logs and the published configs after them; a database from
+// before gets the column and the tables on first use (schema.sql has them too).
 const ownDone = new WeakSet();
 async function ownColumn(env) {
   if (ownDone.has(env.DB)) return;
   try { await env.DB.prepare('ALTER TABLE scores ADD COLUMN own INTEGER NOT NULL DEFAULT 0').run(); } catch (e) { /* already there */ }
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS keylogs (key_hash TEXT NOT NULL, run_id TEXT NOT NULL, log TEXT NOT NULL, PRIMARY KEY (key_hash, run_id))').run();
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS confs (key_hash TEXT PRIMARY KEY, text TEXT NOT NULL, at TEXT NOT NULL)').run();
   ownDone.add(env.DB);
 }
 
@@ -174,10 +185,18 @@ async function enter(env, hash, run) {
   if (!me || !me.name) throw new Fail(400, 'set a name first');
   const now = new Date();
   const c = checkRun(run, now);
+  // The log says how it was pressed; the reason a run is refused is in the
+  // answer (and the Worker's log), so a wrongly refused player can be found.
+  let log;
+  try { log = checkLog(run); } catch (e) { console.log('refused ' + (me.name || '') + ' ' + run.course + ': ' + e.message); throw e; }
   await ownColumn(env);
   await env.DB.prepare(
     'INSERT OR IGNORE INTO scores (run_id, key_hash, course, ver, time, day, at, splits, own) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)'
   ).bind(run.id, hash, run.course, VER, c.time, jstDay(now), now.toISOString(), JSON.stringify(c.splits), c.own).run();
+  if (log) {
+    await env.DB.prepare('INSERT OR IGNORE INTO keylogs (key_hash, run_id, log) VALUES (?1, ?2, ?3)')
+      .bind(hash, run.id, JSON.stringify({ keys: log.keys, q: log.q, cut: log.cut || undefined })).run();
+  }
   // Where it stands today among each player's best.
   const day = jstDay(now);
   const rank = await env.DB.prepare(
@@ -204,7 +223,9 @@ async function bestRows(env, q, max) {
   const w = spanWhere(q.get('span') || 'today');
   await ownColumn(env);
   const res = await env.DB.prepare(
-    'SELECT p.name, s.time, s.day, s.splits, s.at, s.own FROM scores s JOIN players p ON p.key_hash = s.key_hash ' +
+    'SELECT p.name, s.time, s.day, s.splits, s.at, s.own, s.run_id, s.key_hash, ' +
+    '(SELECT 1 FROM confs c WHERE c.key_hash = s.key_hash) AS conf, (SELECT 1 FROM keylogs k WHERE k.key_hash = s.key_hash AND k.run_id = s.run_id) AS haslog ' +
+    'FROM scores s JOIN players p ON p.key_hash = s.key_hash ' +
     'WHERE s.course = ?1 AND s.ver = ?2' + w.sql + ' AND p.name IS NOT NULL ' +
     'AND s.time = (SELECT MIN(t.time) FROM scores t WHERE t.key_hash = s.key_hash AND t.course = s.course AND t.ver = s.ver' + w.sql.replace(/s\./g, 't.') + ') ' +
     'GROUP BY s.key_hash ORDER BY s.time, s.at LIMIT ' + max
@@ -214,14 +235,52 @@ async function bestRows(env, q, max) {
 
 async function board(env, q) {
   const rows = await bestRows(env, q, 50);
-  return json({ rows: rows.map((r, i) => ({ rank: i + 1, name: r.name, time: r.time, day: r.day, own: r.own ? 1 : 0 })) }, 200, { 'Cache-Control': 'max-age=15' });
+  // conf: the player's own .tmux.conf is published; log: this run can be watched.
+  return json({ rows: rows.map((r, i) => ({ rank: i + 1, name: r.name, time: r.time, day: r.day, own: r.own ? 1 : 0, conf: r.own && r.conf ? 1 : 0, log: r.haslog ? 1 : 0 })) }, 200, { 'Cache-Control': 'max-age=15' });
 }
 
+// The run to race or to watch: the best of the span, the slowest one faster
+// than `above` (the next player up), or `name`'s best. With its key log.
 async function ghost(env, q) {
-  const rows = await bestRows(env, q, 1);
-  if (!rows.length) return json({ ghost: null });
-  const r = rows[0];
-  return json({ ghost: { name: r.name, time: r.time, day: r.day, own: r.own ? 1 : 0, splits: JSON.parse(r.splits) } }, 200, { 'Cache-Control': 'max-age=15' });
+  const name = q.get('name'), above = parseFloat(q.get('above'));
+  const rows = await bestRows(env, q, name || above > 0 ? 50 : 1);
+  let r = null;
+  if (name) r = rows.find((x) => x.name === name) || null;
+  else if (above > 0) { const faster = rows.filter((x) => x.time < above); r = faster.length ? faster[faster.length - 1] : null; }
+  else r = rows[0] || null;
+  if (!r) return json({ ghost: null });
+  const rank = rows.indexOf(r) + 1;
+  const log = await env.DB.prepare('SELECT log FROM keylogs WHERE key_hash = ?1 AND run_id = ?2').bind(r.key_hash, r.run_id).first();
+  return json({ ghost: { name: r.name, time: r.time, day: r.day, rank, own: r.own ? 1 : 0, conf: r.own && r.conf ? 1 : 0, splits: JSON.parse(r.splits), keys: log ? JSON.parse(log.log) : null } }, 200, { 'Cache-Control': 'max-age=15' });
+}
+
+// ---- published .tmux.conf ----------------------------------------------------
+// A player with a name may put the file they play with beside their rows,
+// as pasted (nothing is stripped: the game shows what will be public first).
+// An empty text takes it down.
+
+async function setConf(env, hash, text) {
+  if (typeof text !== 'string') throw new Fail(400, 'bad text');
+  if (new TextEncoder().encode(text).length > CONF_MAX) throw new Fail(413, 'too large');
+  await ownColumn(env);
+  if (!text.trim()) {
+    await env.DB.prepare('DELETE FROM confs WHERE key_hash = ?1').bind(hash).run();
+    return json({ shared: false });
+  }
+  const me = await env.DB.prepare('SELECT name FROM players WHERE key_hash = ?1').bind(hash).first();
+  if (!me || !me.name) throw new Fail(400, 'set a name first');
+  await env.DB.prepare('INSERT INTO confs (key_hash, text, at) VALUES (?1, ?2, ?3) ON CONFLICT (key_hash) DO UPDATE SET text = ?2, at = ?3')
+    .bind(hash, text, new Date().toISOString()).run();
+  return json({ shared: true });
+}
+
+async function getConf(env, q) {
+  const name = cleanName(q.get('name'));
+  if (!name) throw new Fail(400, 'bad name');
+  await ownColumn(env);
+  const row = await env.DB.prepare('SELECT c.text, c.at FROM confs c JOIN players p ON p.key_hash = c.key_hash WHERE p.name = ?1').bind(name).first();
+  if (!row) throw new Fail(404, 'no conf');
+  return json({ name, text: row.text, at: row.at }, 200, { 'Cache-Control': 'max-age=15' });
 }
 
 // ---- counts -------------------------------------------------------------------

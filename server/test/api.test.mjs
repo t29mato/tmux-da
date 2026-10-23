@@ -182,3 +182,113 @@ test('counts: anything but the known steps is refused', async () => {
     assert.equal((await call('POST', '/v1/ev', b)).status, 400, JSON.stringify(b));
   }
 });
+
+// ---- key logs, ghosts to pick, published configs ----------------------------
+import fs from 'node:fs';
+const FIX = JSON.parse(fs.readFileSync(new URL('./fixtures/keylogs.json', import.meta.url), 'utf8'));
+// A human run on today's order, with a log that fits it: `g` ms a key, the
+// boundaries from the splits, the last key at the clock's end.
+const logged = (id, course, s, misses = 0, extra = {}) => {
+  const r = human(id, course, s, misses, extra);
+  const n = r.qs.length, keys = [], q = [];
+  let t = 0;
+  for (let i = 0; i < n; i++) {
+    q.push(Math.round(t));
+    // Two keys a question: the prefix a bit in, the key at the end (a hand: never the same gap twice).
+    keys.push([Math.round(t + s * 1000 * 0.4 + (i % 7) * 3), 'Ctrl+b']);
+    keys.push([Math.round(t + s * 1000 - 20 - (i % 5) * 4), '%']);
+    t += s * 1000;
+  }
+  r.keys = keys.length;
+  r.klog = { keys, q };
+  return r;
+};
+
+test('scores: the key log is kept with the run and comes back with the ghost', async () => {
+  const key = await player('こま');
+  const r = logged('l1', 'easy', 1.2);
+  assert.equal((await call('POST', '/v1/scores', { key, run: r })).status, 200);
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM keylogs').get().n, 1);
+  const g = (await call('GET', '/v1/ghost?course=easy&span=today')).body.ghost;
+  assert.equal(g.name, 'こま');
+  assert.equal(g.keys.keys.length, 30);
+  assert.equal(g.keys.q.length, 15);
+  assert.equal(g.rank, 1);
+  const rows = (await call('GET', '/v1/board?course=easy&span=today')).body.rows;
+  assert.deepEqual(rows.map((x) => [x.name, x.log, x.conf]), [['こま', 1, 0]]);
+});
+
+test('scores: a run recorded from a real hand (fixture) is accepted', async () => {
+  const key = await player('ひと');
+  // The fixture's questions are of its own day: the log is checked on today's order.
+  const r = human('f1', 'easy', 0.49);
+  const f = FIX['easy-expert'];
+  r.qs = r.qs.map((q, i) => ({ ...q, s: f.qs[i].s }));
+  r.time = +f.qs.reduce((a, q) => a + q.s, 0).toFixed(2);
+  r.keys = f.keys; r.klog = f.klog;
+  const res = await call('POST', '/v1/scores', { key, run: r });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+});
+
+test('scores: a script\'s log is refused with the reason; an older client without a log is not', async () => {
+  const key = await player('きかい');
+  const bot = logged('b1', 'easy', 1.0);
+  bot.klog.keys = bot.klog.keys.map((e, i) => [Math.round(i * 500), e[1]]);
+  const res = await call('POST', '/v1/scores', { key, run: bot });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /^key log: /);
+  const old = human('o1', 'easy', 1.0);
+  delete old.klog;
+  assert.equal((await call('POST', '/v1/scores', { key, run: old })).status, 200);
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM keylogs').get().n, 0);
+});
+
+test('ghost: the next one up from a time, and a player\'s own best by name', async () => {
+  for (const [name, s] of [['いち', 1.0], ['に', 1.5], ['さん', 2.0]]) {
+    const key = await player(name);
+    await call('POST', '/v1/scores', { key, run: logged('g_' + name, 'easy', s) });
+  }
+  const next = (await call('GET', '/v1/ghost?course=easy&span=today&above=30')).body.ghost;
+  assert.equal(next.name, 'に', 'the slowest run faster than 30 s');
+  assert.equal(next.rank, 2);
+  assert.equal((await call('GET', '/v1/ghost?course=easy&span=today&above=15')).body.ghost, null, 'nobody faster than 15 s');
+  const named = (await call('GET', '/v1/ghost?course=easy&span=today&name=' + encodeURIComponent('さん'))).body.ghost;
+  assert.equal(named.time, 30);
+  assert.equal(named.keys.keys.length, 30);
+  assert.equal((await call('GET', '/v1/ghost?course=easy&span=today&name=nobody')).body.ghost, null);
+});
+
+test('conf: a named player publishes the file, anyone reads it, the owner takes it down', async () => {
+  const key = await player('せってい');
+  const text = 'set -g prefix C-a\nbind | split-window -h\n';
+  assert.equal((await call('POST', '/v1/conf', { key, text })).body.shared, true);
+  const got = await call('GET', '/v1/conf?name=' + encodeURIComponent('せってい'));
+  assert.equal(got.status, 200);
+  assert.equal(got.body.text, text, 'as pasted, nothing stripped');
+  await call('POST', '/v1/scores', { key, run: logged('c1', 'easy', 1.0, 0, { conf: 1, prefix: 'Ctrl+a' }) });
+  const rows = (await call('GET', '/v1/board?course=easy&span=today')).body.rows;
+  assert.deepEqual(rows.map((x) => [x.own, x.conf]), [[1, 1]]);
+  assert.equal((await call('GET', '/v1/ghost?course=easy&span=today')).body.ghost.conf, 1);
+  assert.equal((await call('POST', '/v1/conf', { key, text: '' })).body.shared, false);
+  assert.equal((await call('GET', '/v1/conf?name=' + encodeURIComponent('せってい'))).status, 404);
+  assert.deepEqual((await call('GET', '/v1/board?course=easy&span=today')).body.rows.map((x) => x.conf), [0]);
+});
+
+test('conf: needs a name, at most 8 KB, a string', async () => {
+  const anon = await player();
+  assert.equal((await call('POST', '/v1/conf', { key: anon, text: 'bind x kill-pane' })).status, 400);
+  const key = await player('おおきい');
+  assert.equal((await call('POST', '/v1/conf', { key, text: 'x'.repeat(8 * 1024 + 1) })).status, 413);
+  assert.equal((await call('POST', '/v1/conf', { key, text: 'あ'.repeat(3000) })).status, 413, 'bytes, not characters');
+  assert.equal((await call('POST', '/v1/conf', { key, text: 42 })).status, 400);
+  assert.equal((await call('GET', '/v1/conf?name=')).status, 400);
+  assert.equal((await call('GET', '/v1/conf?name=' + encodeURIComponent('だれもいない'))).status, 404);
+});
+
+test('a database from before the key logs and the configs gets their tables on first use', async () => {
+  env.DB.raw.exec('DROP TABLE keylogs; DROP TABLE confs;');
+  const key = await player('ふるい');
+  assert.equal((await call('POST', '/v1/scores', { key, run: logged('old1', 'easy', 1) })).status, 200);
+  assert.equal((await call('GET', '/v1/board?course=easy&span=today')).body.rows[0].log, 1);
+  assert.equal((await call('POST', '/v1/conf', { key, text: 'bind x kill-pane' })).body.shared, true);
+});
