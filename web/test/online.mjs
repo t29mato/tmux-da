@@ -111,9 +111,10 @@ if (SHOTS) await B.page.screenshot({ path: SHOTS + '/online-ghost.png' });
 
 // The order the game asks today is the order the server expects (its copy
 // of the shuffle): a real run of each course passes the check.
-for (const course of ['easy', 'normal', 'hard']) {
+for (const course of ['easy', 'normal', 'hard', 'pro', 'daily']) {
   const C = await open();
-  await C.page.click('#course-list [data-course="' + course + '"]');
+  if (course === 'daily') await C.page.click('#today [data-daily]');
+  else await C.page.click('#course-list [data-course="' + course + '"]');
   await C.page.waitForFunction(() => window.tmuxDa.state().run && window.tmuxDa.state().run.phase === 'play', null, { timeout: 10000 });
   const asked = await C.page.evaluate(() => window.tmuxDa.state().run.qs);
   const expect = dailyOrder(course, jstDay(new Date()));
@@ -145,7 +146,7 @@ const state = (page) => page.evaluate(() => window.tmuxDa.state());
 const playByGuide = async (page, course, prefix, pace = [260, 500]) => {
   await page.click('#course-list [data-course="' + course + '"]');
   await page.waitForFunction(() => { const r = window.tmuxDa.state().run; return r && r.phase === 'play'; }, null, { timeout: 15000 });
-  for (let guard = 0; guard < 200; guard++) {
+  for (let guard = 0; guard < 400; guard++) {
     const s = await state(page);
     if (!s.run) break;
     if (s.run.phase !== 'play') { await page.waitForTimeout(30); continue; }
@@ -155,9 +156,11 @@ const playByGuide = async (page, course, prefix, pace = [260, 500]) => {
     if (!mv) continue;
     // A hand: the prefix, a moment, the key.
     if (mv.pfx) { await page.keyboard.press(prefix); await page.waitForTimeout(40 + Math.random() * 100); }
-    if (mv.type) { await page.keyboard.type(mv.type, { delay: 70 }); await page.keyboard.press('Enter'); continue; }
+    if (mv.type) { if (/Ctrl\+u/.test(mv.text)) await page.keyboard.press('Control+u'); await page.keyboard.type(mv.type, { delay: 70 }); await page.keyboard.press('Enter'); continue; }
     if (!mv.keys.length) { await page.keyboard.press('Control+u'); await page.keyboard.type(s.run.goal, { delay: 70 }); await page.keyboard.press('Enter'); continue; }
-    await page.keyboard.press(ARROW[mv.keys[0]] || mv.keys[0]);
+    // Option+1, Ctrl+o (the 達人 house's layouts and rotate-window).
+    const mod = /^(Ctrl|Option|Alt)\+(.+)$/.exec(mv.keys[0]);
+    await page.keyboard.press(mod ? (mod[1] === 'Ctrl' ? 'Control+' : 'Alt+') + mod[2] : ARROW[mv.keys[0]] || (mv.keys[0] === 'Esc' ? 'Escape' : mv.keys[0]));
   }
   await page.waitForFunction(() => window.tmuxDa.state().screen === 'result', null, { timeout: 15000 });
   await page.waitForFunction(() => { const r = window.tmuxDa.state().result; return r.board && r.board.state !== 'sending'; }, null, { timeout: 15000 });
@@ -301,6 +304,49 @@ await E.page.click('[data-rec-tab="board"]');
 await E.page.evaluate(() => { window.tmuxDa && (document.querySelector('[data-span="week"]').click()); });
 await E.page.waitForSelector('.rec-table.board tbody tr');
 ok(await E.page.$('.rec-table.board [data-conf-of="' + name + '"]') === null, 'E: after 公開をやめる the board has no link to the file');
+
+// ---- 達人 and 今日の達人 ----------------------------------------------------
+// A plays both by the guide at a hand's pace: the server takes the 達人 house
+// and the day's question, and the daily board lists the keys and the peek.
+await A.page.click('#btn-records-back').catch(() => {});
+await A.page.evaluate(() => document.querySelector('.to-title') && document.querySelector('.to-title').click());
+await A.page.waitForFunction(() => window.tmuxDa.state().screen === 'title');
+await A.page.click('#conf-reset');
+const rp3 = await playByGuide(A.page, 'pro', 'Control+b', [300, 500]);
+ok(rp3.board.state === 'ok' && rp3.misses === 0, 'A: a 達人 run by hand enters the board (' + JSON.stringify(rp3.board) + ')');
+await A.page.click('#result-body [data-title]');
+const lineA = await A.page.$eval('#today .today-daily', (e) => e.textContent);
+ok(/今日の達人: .+ ・ 最短 \d+ キー/.test(lineA), 'A: the title line: ' + lineA.replace(/\s+/g, ' '));
+await A.page.click('#today [data-daily]');
+await A.page.waitForFunction(() => { const r = window.tmuxDa.state().run; return r && r.phase === 'play'; }, null, { timeout: 15000 });
+// The guide's move from the state hook: played from memory, no peek.
+for (let guard = 0; guard < 80; guard++) {
+  const s = await state(A.page);
+  if (!s.run) break;
+  if (s.run.phase !== 'play') { await A.page.waitForTimeout(30); continue; }
+  await A.page.waitForTimeout(250 + Math.random() * 200);
+  const mv = s.run.next;
+  if (!mv) continue;
+  if (mv.pfx) { await A.page.keyboard.press('Control+b'); await A.page.waitForTimeout(40 + Math.random() * 90); }
+  if (mv.type) { if (/Ctrl\+u/.test(mv.text)) await A.page.keyboard.press('Control+u'); await A.page.keyboard.type(mv.type, { delay: 70 }); await A.page.keyboard.press('Enter'); continue; }
+  const m = /^(Ctrl|Option|Alt)\+(.+)$/.exec(mv.keys[0]);
+  await A.page.keyboard.press(m ? (m[1] === 'Ctrl' ? 'Control+' : 'Alt+') + m[2] : ARROW[mv.keys[0]] || (mv.keys[0] === 'Esc' ? 'Escape' : mv.keys[0]));
+}
+await A.page.waitForFunction(() => window.tmuxDa.state().screen === 'result', null, { timeout: 15000 });
+await A.page.waitForFunction(() => { const r = window.tmuxDa.state().result; return r.board && r.board.state !== 'sending'; }, null, { timeout: 15000 });
+const rd = (await state(A.page)).result;
+ok(rd.daily && rd.board.state === 'ok' && !rd.qlog[0].g, 'A: 今日の達人 enters its board, played without the 手順 (' + JSON.stringify(rd.board) + ')');
+await A.page.waitForSelector('#result-body .daily-board tr.is-me', { timeout: 10000 });
+const drow = await A.page.$eval('#result-body .daily-board tr.is-me', (e) => e.textContent);
+ok(drow.indexOf(name) >= 0 && drow.indexOf(rd.keys + ' / 最短 ' + rd.qlog[0].p) >= 0 && !/手順を見た/.test(drow), 'A: the day\'s board under the result: ' + drow);
+const dshare = await A.page.$eval('#result-body .share-text', (e) => e.textContent);
+ok(dshare.indexOf('?watch=' + rd.runId) >= 0 && /今日の達人/.test(dshare), 'A: its share text carries the watch link: ' + dshare.replace(/\n/g, ' / '));
+if (SHOTS) await A.page.screenshot({ path: SHOTS + '/online-daily.png', fullPage: true });
+// Another device sees it, and can watch it.
+const F = await open(rd.runId);
+await F.page.waitForFunction(() => window.tmuxDa.state().replay, null, { timeout: 15000 });
+ok((await state(F.page)).replay.who === name, 'F: the daily run replays from its link');
+await F.page.context().close();
 
 // The unknown 合言葉 above is a 404 on purpose; anything else is a fault.
 const errs = A.errors.concat(B.errors, D.errors, E.errors, W.errors).filter((e) => !/status of 404/.test(e));

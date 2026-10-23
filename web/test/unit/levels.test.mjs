@@ -9,12 +9,25 @@ const LV = load(['levels.js']).ADV.levels;
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 test('the server knows every course with the same number of questions and rules', () => {
-  assert.deepEqual(plain(Object.fromEntries(LV.COURSES.map((c) => [c.id, c.qs.length]))), SERVER_COURSES);
+  assert.deepEqual(plain({ ...Object.fromEntries(LV.COURSES.map((c) => [c.id, c.qs.length])), [LV.DAILY.id]: 1 }), SERVER_COURSES);
   for (const c of LV.COURSES) assert.equal(c.ver, VER, c.id);
 });
 
-test('course ids stay easy / normal / hard so old records carry over', () => {
-  assert.deepEqual(plain(LV.COURSES.map((c) => c.id)), ['easy', 'normal', 'hard']);
+test('course ids stay easy / normal / hard so old records carry over; 達人 comes after them', () => {
+  assert.deepEqual(plain(LV.COURSES.map((c) => c.id)), ['easy', 'normal', 'hard', 'pro']);
+  const pro = LV.COURSES[3];
+  assert.ok(pro.expert && !pro.recommended && !pro.practice, '達人 is open to everyone, for those who use tmux');
+  assert.ok(pro.qs.length >= 12 && pro.qs.length <= 16, pro.qs.length + ' questions');
+});
+
+test('今日の達人: one question of the 達人 house a day, the same for everyone, every type in turn', () => {
+  const pool = plain(LV.dailyPool());
+  assert.deepEqual(pool, [...new Set(LV.COURSES[3].qs)]);
+  assert.equal(LV.dailyPick('2026-10-24'), LV.dailyPick('2026-10-24'));
+  const seen = new Set();
+  for (let d = 0; d < 120; d++) seen.add(LV.dailyPick(new Date(Date.UTC(2026, 9, 1) + d * 86400000).toISOString().slice(0, 10)));
+  assert.equal(seen.size, pool.length, 'every type comes up within four months');
+  assert.ok(LV.DAILY.daily && LV.DAILY.blind && !LV.COURSES.includes(LV.DAILY), 'not a house: no title, its own board');
 });
 
 test('rankFor: the belt ladder by seconds per question, scaled by rankMul', () => {
@@ -60,6 +73,13 @@ test('rankMul: the same hands land on about the same Lv and title on every cours
     assert.ok(Math.max(...idx) - Math.min(...idx) <= 1, JSON.stringify(m) + ' → titles ' + idx.join('/'));
   }
   assert.equal(LV.levelFor(5.2), 9, 'a beginner reading the 手順 is well off Lv 1');
+  // 達人 against 上級: a bot following the 手順 at three paces (think per move,
+  // per key, per typed character: 0.3/0.1/0.07, 0.5/0.12/0.09, 0.8/0.2/0.15 秒).
+  const pro = LV.COURSES[3].rankMul;
+  for (const m of [{ hard: 1.68, pro: 1.99 }, { hard: 2.43, pro: 2.68 }, { hard: 3.86, pro: 4.27 }]) {
+    assert.ok(Math.abs(LV.levelFor(m.hard / mul.hard) - LV.levelFor(m.pro / pro)) <= 1, JSON.stringify(m));
+    assert.ok(Math.abs(LV.rankIndex(LV.rankFor(m.hard, mul.hard)) - LV.rankIndex(LV.rankFor(m.pro, pro))) <= 1, JSON.stringify(m));
+  }
 });
 
 test('nextRank: the title a course time holds, the next one, the seconds it needs and the gap per question', () => {
@@ -85,7 +105,7 @@ test('nextRank: the title a course time holds, the next one, the seconds it need
 
 test('par (お手本) is 師範代 pace on every question, by name', () => {
   assert.equal(LV.PAR_RANK, '師範代');
-  assert.deepEqual(plain(LV.COURSES.map((c) => LV.par(c))), [53, 88, 90], '3.5 秒 × rankMul × 問');
+  assert.deepEqual(plain(LV.COURSES.map((c) => LV.par(c))), [53, 88, 90, 88], '3.5 秒 × rankMul × 問');
   assert.equal(LV.par(LV.KEIKO, 9), 41, 'the 稽古の間 counts the questions it picked');
   assert.equal(LV.rankIndex(LV.STEP_UP_RANK), 4, 'the next house is suggested from 黒帯');
 });

@@ -333,7 +333,7 @@ async function guided(browser, platform) {
   const errors = watch(page);
   await page.goto(PAGE);
   const all = new Set();
-  for (const id of ['normal', 'hard']) {
+  for (const id of ['normal', 'hard', 'pro']) {
     await page.click(`#course-list [data-course="${id}"]`);
     const seen = await playCourse(page, 'Control+b', 'C-b', L + ' ' + id, 'guide');
     seen.forEach((t) => all.add(t));
@@ -732,12 +732,13 @@ async function confFidelity(browser) {
   const c = (await st(page)).conf;
   ok(c && c.prefix === 'Ctrl+a' && c.modeKeys === 'vi' && c.statusTop === true, L + ' prefix Ctrl+a, mode-keys vi and status-position top are read (' + JSON.stringify(c) + ')');
   const report = await page.$eval('#conf-report', (e) => e.textContent);
-  ok(/未対応 8 行/.test(report) && /関係ない 2 行/.test(report), L + ' the report tells 8 未対応 lines from 2 that do not matter (' + (report.match(/(未対応|関係ない) \d+ 行/g) || []).join(', ') + ')');
+  ok(/未対応 6 行/.test(report) && /関係ない 2 行/.test(report), L + ' the report tells 6 未対応 lines from 2 that do not matter (' + (report.match(/(未対応|関係ない) \d+ 行/g) || []).join(', ') + ')');
   const mk = await page.$$eval('#conf-report > ul li', (e) => e.map((x) => x.textContent).find((t) => /mode-keys/.test(t)) || '');
   ok(/vi 式/.test(mk) && !/見た目/.test(mk), L + ' mode-keys is a used line (vi keys), no longer 見た目の設定 (' + mk.trim() + ')');
   const unsup = await page.$$eval('#conf-report details[open] li code', (e) => e.map((x) => x.textContent.replace(/^\d+/, '').trim()));
-  ok(unsup.some((l) => /select-layout tiled/.test(l)) && unsup.some((l) => /break-pane -d/.test(l)) && unsup.some((l) => /tmux-resurrect/.test(l)) && !unsup.some((l) => /mouse on/.test(l)),
-    L + ' = tiled, break-pane -d and the plugin are 未対応; mouse on is not (' + unsup.join(' | ') + ')');
+  // select-layout and synchronize-panes came with the 達人 house: used now.
+  ok(!unsup.some((l) => /select-layout tiled|synchronize-panes/.test(l)) && unsup.some((l) => /break-pane -d/.test(l)) && unsup.some((l) => /tmux-resurrect/.test(l)) && !unsup.some((l) => /mouse on/.test(l)),
+    L + ' break-pane -d and the plugin are 未対応; = tiled, S sync and mouse on are not (' + unsup.join(' | ') + ')');
   await page.click('#course-list [data-course="hard"]');
   await waitPlay(page);
   ok(await page.evaluate(() => document.body.dataset.status === 'top' && document.querySelector('#status').getBoundingClientRect().bottom <= document.querySelector('#term').getBoundingClientRect().top),
@@ -752,11 +753,12 @@ async function confFidelity(browser) {
   ok(s.activeIndex !== made && !/2 回押した/.test(await page.$eval('#status', (e) => e.textContent)), L + ' Ctrl+a Ctrl+a runs last-window (bind C-a last-window), not send-prefix');
   await page.keyboard.press(P); await page.keyboard.press('Tab');
   ok((await st(page, true)).activeIndex === made && !/l は直前/.test(await page.$eval('#status', (e) => e.textContent)), L + ' Tab goes back without the lecture about l');
-  // = is bound to select-layout tiled: nothing, said, no choose-buffer, no miss.
-  const m0 = (await st(page, true)).run.misses;
+  // = is bound to select-layout tiled: the window is tiled (a change this
+  // question does not ask for), no choose-buffer.
   await page.keyboard.press(P); await page.keyboard.press('=');
   s = await st(page, true);
-  ok(s.picker === null && /未対応/.test(await page.$eval('#status', (e) => e.textContent)) && s.run.misses === m0, L + ' = does nothing but say it is unsupported (no choose-buffer, no miss)');
+  ok(s.picker === null && s.layout === 'tiled', L + ' = lays the window out tiled (bind = select-layout tiled), no choose-buffer');
+  const m0 = s.run.misses;
   // choose-tree -w shows the windows under the session.
   await page.keyboard.press(P); await page.keyboard.press('Control+w');
   const rows = await page.$$eval('#term .picker-row', (e) => e.map((x) => x.textContent));
@@ -1039,9 +1041,9 @@ async function records(browser) {
   page.on('dialog', (d) => d.accept());
   await page.goto(PAGE);
   const names = await page.$$eval('.wing-name', (els) => els.map((e) => e.firstChild.textContent));
-  ok(names.join('|') === '入門|中級|上級', L + ' the three courses are named (' + names.join('|') + ')');
+  ok(names.join('|') === '入門|中級|上級|達人', L + ' the four courses are named (' + names.join('|') + ')');
   const modes = await page.$$eval('.wing-mode', (els) => els.map((e) => e.textContent));
-  ok(modes.join('|') === '手ならし|腕試し|真剣勝負', L + ' the three modes are named (' + modes.join('|') + ')');
+  ok(modes.join('|') === '手ならし|腕試し|真剣勝負|使っている人へ', L + ' the four modes are named (' + modes.join('|') + ')');
   ok(await page.$$eval('.wing-mode.rec', (els) => els.length === 1 && !!els[0].closest('[data-course="easy"]')), L + ' only 三間屋敷 is recommended');
   ok(/お手本 53 秒/.test(await page.$eval('[data-course="easy"] .wing-best', (e) => e.textContent)), L + ' a course with no runs shows the お手本 time');
   ok(/入門/.test(await page.$eval('#btn-enter', (e) => e.textContent)), L + ' はじめる starts with 入門 the first time');
@@ -2361,7 +2363,7 @@ async function loop7(browser) {
   errors = watch(page);
   await page.goto(PAGE);
   const hks = await page.$$eval('#course-list .wing-name kbd.hk', (l) => l.map((e) => e.textContent).join(''));
-  ok(hks === '123', L + ' the course cards show their keys 1 2 3 (' + hks + ')');
+  ok(hks === '1234', L + ' the course cards show their keys 1 2 3 4 (' + hks + ')');
   await page.keyboard.press('3');
   await waitPlay(page);
   ok((await st(page)).run.course === 'hard', L + ' 3 on the title starts 上級 at once');
@@ -2608,7 +2610,7 @@ async function loop11(browser) {
     const page = await ctx.newPage();
     const errors = watch(page);
     await page.goto(PAGE);
-    ok(await page.$$eval('#course-list [data-course]', (l) => l.length) === 3, L + ' ' + name + ': the title shows the courses');
+    ok(await page.$$eval('#course-list [data-course]', (l) => l.length) === 4, L + ' ' + name + ': the title shows the courses');
     if (name === 'runs without their bests') {
       ok(/60\.0/.test(await page.$eval('#course-list [data-course="easy"] .wing-best', (e) => e.textContent)), L + ' ' + name + ': the fastest run is the best');
     }
@@ -3006,6 +3008,159 @@ async function ghost(browser) {
   }
 }
 
+// 達人: the fourth house, for people who already use tmux, and 今日の達人
+// (one of its questions a day, without the 手順). Every question type is
+// solved by the guide on the default keys (guided() plays it too) and on
+// the expert's own file, the layouts show their 完成図, the daily question
+// is played without and with a peek at the 手順, and a replay hides the
+// buttons that belong to play. Nothing here depends on the day's order:
+// the 達人 house asks every one of its types every day, and the daily one
+// is followed from the guide's own move.
+async function tatsujin(browser) {
+  const L = '[tatsujin]';
+  const shotsDir = SHOTS ? path.join(SHOTS, 'tatsujin') : '';
+  const snap = async (page, name, full) => { if (!shotsDir) return; fs.mkdirSync(shotsDir, { recursive: true }); await page.screenshot({ path: path.join(shotsDir, name + '.png'), fullPage: !!full }); };
+  const types = (page) => page.evaluate(() => [...new Set(ADV.levels.COURSES[3].qs)]);
+  // The 達人 course by the guide; returns the types seen and the keys the guide named.
+  const playPro = async (page, prefix, tag, paced) => {
+    await page.click('#course-list [data-course="pro"]');
+    await waitPlay(page);
+    const seen = new Set(), keys = new Set();
+    let figs = 0, layoutQs = 0, shotLayout = false;
+    for (let guard = 0; guard < 400; guard++) {
+      const s = await st(page);
+      if (!s.run || s.run.phase !== 'play') break;
+      seen.add(s.run.type);
+      if (s.run.next && s.run.next.keys[0]) keys.add(s.run.next.keys[0]);
+      if (/^layout/.test(s.run.type)) {
+        layoutQs++;
+        const n = await page.$$eval('#term .guide-card .ob-fig i', (e) => e.length).catch(() => 0);
+        if (n === s.panes.length) figs++;
+        if (!shotLayout) { shotLayout = true; await snap(page, 'layout-' + tag); }
+      }
+      if (paced) await page.waitForTimeout(60 + Math.random() * 90);
+      await followGuide(page, prefix);
+    }
+    return { seen, keys, figs, layoutQs };
+  };
+
+  for (const [tag, vp, scheme, locale] of [['desk', DESKTOP, 'light', 'ja-JP'], ['phone', PHONE, 'dark', 'en-US']]) {
+    const ctx = await browser.newContext({ viewport: vp, reducedMotion: 'reduce', colorScheme: scheme, locale, isMobile: vp === PHONE, hasTouch: vp === PHONE });
+    const page = await ctx.newPage();
+    const errors = watch(page);
+    const missing = new Set();
+    page.on('console', (m) => { if (/\[i18n\]/.test(m.text())) missing.add(m.text()); });
+    const EN = locale === 'en-US';
+    await page.goto(PAGE);
+    // The card: after 上級, open to everyone, for people who use tmux.
+    const ids = await page.$$eval('#course-list [data-course]', (b) => b.map((x) => x.dataset.course));
+    ok(ids.join(',') === 'easy,normal,hard,pro', L + tag + ' the 達人 house comes fourth (' + ids.join(',') + ')');
+    const card = await page.$eval('#course-list [data-course="pro"]', (e) => e.textContent);
+    ok(EN ? /Pro/.test(card) && /For tmux users/.test(card) && /already use tmux/.test(card) : /達人/.test(card) && /使っている人へ/.test(card) && /もう使っている人へ/.test(card), L + tag + ' its card says it is for people who already use tmux: ' + card.replace(/\s+/g, ' ').slice(0, 90));
+    ok(!(await page.$('#course-list [data-course="pro"].locked, #course-list [data-course="pro"][disabled]')), L + tag + ' and it is open to everyone');
+    // 今日の達人 in one line, near 今日の問題.
+    const line = await page.$eval('#today .today-daily', (e) => e.textContent).catch(() => '');
+    ok(EN ? /Today's Pro: .+ · fewest \d+ keys/.test(line) : /今日の達人: .+ ・ 最短 \d+ キー/.test(line), L + tag + ' the title has 今日の達人 in one line: ' + line.replace(/\s+/g, ' '));
+    const lineBox = await page.$eval('#today .today-daily', (e) => { const r = e.getBoundingClientRect(); return { h: r.height, w: r.width, sw: e.scrollWidth }; });
+    ok(lineBox.h < 44 && lineBox.sw <= lineBox.w + 1, L + tag + ' on one line, nothing spilling (' + Math.round(lineBox.h) + 'px high)');
+    await snap(page, 'title-' + tag, true);
+
+    // The house by the guide, at a hand's pace: no wrong key, every type.
+    const pro = await playPro(page, 'Control+b', tag, true);
+    await waitResult(page, L + tag);
+    let r = (await st(page)).result;
+    const want = await types(page);
+    ok(want.every((t) => pro.seen.has(t)) && want.length >= 12, L + tag + ' every 達人 type came up (' + pro.seen.size + '/' + want.length + ')');
+    ok(r.misses === 0, L + tag + ' following the guide makes no miss (' + r.misses + ')');
+    ok(r.qlog.every((q) => typeof q.p === 'number' && q.k === q.p), L + tag + ' and presses exactly the fewest keys: ' + r.qlog.map((q) => q.t + ' ' + q.k + '/' + q.p).join(', '));
+    ok(pro.figs === pro.layoutQs && pro.layoutQs >= 3, L + tag + ' every layout question shows the layout to make, a box per pane (' + pro.figs + '/' + pro.layoutQs + ')');
+    ok(r.qlog.every((q) => q.l === (q.t === 'sync_panes' ? 25 : q.t === 'search_yank' ? 22 : /^layout/.test(q.t) ? 7 : /pane_jump|rotate/.test(q.t) ? 10 : 13)), L + tag + ' each question has its own 目安 from its moves');
+    await snap(page, 'result-' + tag, true);
+
+    // A replay: its own controls, not やめる nor the 手順 detail.
+    await page.click('#result-body [data-replay]');
+    await page.waitForFunction(() => window.tmuxDa.state().replay, null, { timeout: 5000 });
+    const shown = await page.evaluate(() => ['.game-foot .quit', '.game-foot .detail-toggle', '#keybar'].map((s) => { const e = document.querySelector(s); return !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none'; }));
+    ok(shown.every((x) => !x), L + tag + ' a replay hides やめる, the 手順 detail and the key bar (' + shown.join(',') + ')');
+    ok(await page.$eval('#ghostbar', (e) => !e.hidden && !!e.querySelector('[data-rp="close"]')), L + tag + ' and shows its own controls');
+    await page.waitForTimeout(400);
+    await snap(page, 'replay-' + tag);
+    await page.keyboard.press('Escape');
+    ok((await st(page)).screen === 'result', L + tag + ' Esc closes the replay');
+    await page.click('#result-body [data-title]');
+    await page.click('#course-list [data-course="easy"]');
+    await waitPlay(page);
+    const back = await page.evaluate(() => [document.querySelector('.game-foot .quit'), document.querySelector('.game-foot .detail-toggle')].map((e) => getComputedStyle(e).display !== 'none'));
+    ok(tag === 'phone' ? true : back.every(Boolean), L + tag + ' in play they are back');
+    await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+
+    // 今日の達人, without the 手順: solved from the guide's own move (the
+    // state hook), so nothing is peeked.
+    const solveBlind = async (wait) => {
+      if (wait) await page.click('#today [data-daily]'); else await page.keyboard.press('d');
+      await waitPlay(page);
+      let s = await st(page);
+      ok(s.run.course === 'daily' && s.run.n === 1 && s.run.folded, L + tag + ' 今日の達人 is one question, its 手順 folded (' + s.run.type + ')');
+      const card = await page.$eval('#term .guide-card', (e) => e.textContent).catch(() => '');
+      ok(!/▶/.test(card) && (EN ? /No steps/.test(card) : /手順なし/.test(card)), L + tag + ' the card shows no steps: ' + card.replace(/\s+/g, ' ').slice(0, 80));
+      if (wait) {
+        await page.waitForFunction(() => { const r = window.tmuxDa.state().run; return r && !r.folded; }, null, { timeout: 8000 });
+        s = await st(page);
+        ok(s.run.peek && s.run.guides === 1, L + tag + ' after a few seconds the 手順 comes out, and that is kept');
+        await snap(page, 'daily-peek-' + tag);
+      }
+      for (let guard = 0; guard < 80; guard++) {
+        s = await st(page);
+        if (!s.run || s.run.phase !== 'play') break;
+        await followGuide(page, 'Control+b');
+      }
+      await waitResult(page, L + tag + ' daily');
+      return (await st(page)).result;
+    };
+    await page.goto(PAGE);
+    r = await solveBlind(false);
+    const q0 = r.qlog[0];
+    ok(r.daily && r.n === 1 && !q0.g && typeof q0.p === 'number' && q0.k === q0.p, L + tag + ' solved without a peek, in the fewest keys (' + q0.k + '/' + q0.p + ')');
+    let body = await page.$eval('#result-body', (e) => e.textContent.replace(/\s+/g, ' '));
+    ok(EN ? body.includes('Keys pressed ' + r.keys + ' / fewest ' + q0.p) && /Solved without the steps/.test(body) : body.includes('押したキー ' + r.keys + ' ／ 最短 ' + q0.p) && /手順を見ずに解いた/.test(body), L + tag + ' the result says the keys against the fewest, and no peek');
+    let share = await page.$eval('#result-body .share-text', (e) => e.textContent);
+    ok(EN ? /Today's Pro .+ fewest \d+ \(no steps\)/.test(share) : /今日の達人 .+ 最短 \d+（手順なし）/.test(share), L + tag + ' the share text says so: ' + share.split('\n')[0]);
+    ok(!/[ぁ-んァ-ヶ一-龠]/.test(body) || !EN, L + tag + ' no Japanese left on the daily result');
+    await snap(page, 'daily-result-' + tag, true);
+    // Again, waiting for the 手順: the peek is said and shared.
+    await page.click('#result-body [data-title]');
+    const again = await page.$eval('#today .today-daily', (e) => e.textContent);
+    ok(EN ? /today \d+\.\ds/.test(again) && /Again/.test(again) : /今日 \d+\.\d秒/.test(again) && /もう一度/.test(again), L + tag + ' the title line has today\'s time and もう一度: ' + again.replace(/\s+/g, ' '));
+    r = await solveBlind(true);
+    ok(r.qlog[0].g === 1, L + tag + ' the peek is in the run');
+    body = await page.$eval('#result-body', (e) => e.textContent.replace(/\s+/g, ' '));
+    share = await page.$eval('#result-body .share-text', (e) => e.textContent);
+    ok((EN ? /Saw the steps/.test(body) && /saw the steps/.test(share) : /手順を見た/.test(body) && /手順を見た/.test(share)), L + tag + ' and said on the result and in the share text');
+    const db = await page.evaluate(() => window.tmuxDa.records());
+    ok(!db.titles || !db.titles.daily, L + tag + ' 今日の達人 gives no title');
+
+    // The expert's own file: the guide uses their keys (J, m, S, | …) and never misses.
+    await page.click('#result-body [data-title]');
+    await page.evaluate(() => { document.querySelector('#conf-box').open = true; });
+    await page.fill('#conf-text', EXPERT_CONF + '\nbind J command-prompt -p "join pane from:" "join-pane -s \'%%\'"\nbind m command-prompt -p "move window to:" "move-window -t \'%%\'"');
+    await page.click('#conf-apply');
+    const rep = await page.$eval('#conf-report', (e) => e.textContent);
+    ok(!/select-layout|synchronize-panes/.test(rep.split(/未対応|Not in the game/)[1] || ''), L + tag + ' select-layout and synchronize-panes are no longer 未対応');
+    const own = await playPro(page, 'Control+a', tag + '-conf', false);
+    await waitResult(page, L + tag + ' own conf');
+    r = (await st(page)).result;
+    ok(r.misses === 0 && want.every((t) => own.seen.has(t)), L + tag + ' with the expert\'s file every type is solved by the guide, no miss (' + r.misses + ')');
+    ok(['J', 'm', 'S'].every((k) => own.keys.has(k)), L + tag + ' and the guide names their J (join), m (move-window) and S (sync): ' + [...own.keys].join(' '));
+    ok(r.qlog.every((q) => typeof q.p === 'number' && q.k === q.p), L + tag + ' in the fewest keys of that file (' + r.keys + ')');
+    await page.click('#result-body [data-title]');
+    await page.click('#conf-reset');
+
+    if (EN) ok(missing.size === 0, L + tag + ' every text has its English' + (missing.size ? ': ' + [...missing].join(' | ') : ''));
+    ok(errors.length === 0, L + tag + ' no page errors, nothing fetched' + (errors.length ? ': ' + errors.join(' | ') : ''));
+    await ctx.close();
+  }
+}
+
 // The ladder index, as levels.js counts it (0 at 名人), for the checks above.
 const ADV_rankIndex = (t) => ['名人', '達人', '師範', '師範代', '黒帯', '茶帯', '緑帯', '白帯'].indexOf(t);
 
@@ -3052,6 +3207,7 @@ const parts = [
   ['version', version],
   ['belts', belts],
   ['ghost', ghost],
+  ['tatsujin', tatsujin],
   ['sound', sound]
 ];
 const browser = await chromium.launch();

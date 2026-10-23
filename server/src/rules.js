@@ -6,9 +6,12 @@
 export const QUESTIONS = {
   easy: ['split_lr', 'focus', 'zoom', 'split_tb', 'close', 'unzoom', 'focus', 'new_window', 'select_window', 'split_lr', 'close', 'focus', 'zoom', 'select_window', 'split_tb'],
   normal: ['focus', 'resize', 'swap', 'rename', 'close', 'kill_window', 'copy_top', 'split_tb', 'swap', 'select_window', 'zoom', 'new_window', 'detach_attach', 'last_window', 'break_pane', 'unzoom', 'close', 'split_lr', 'rename', 'copy_page'],
-  hard: ['find_zoom', 'trident', 'two_akima', 'new_and_home', 'swap_zoom', 'split_lr', 'yank_paste', 'copy_top', 'session_new', 'trident', 'kill_window', 'session_switch', 'session_attach', 'focus', 'resize', 'copy_search']
+  hard: ['find_zoom', 'trident', 'two_akima', 'new_and_home', 'swap_zoom', 'split_lr', 'yank_paste', 'copy_top', 'session_new', 'trident', 'kill_window', 'session_switch', 'session_attach', 'focus', 'resize', 'copy_search'],
+  pro: ['join_pane', 'layout', 'swap_window', 'sync_panes', 'pane_jump', 'rotate', 'search_yank', 'move_window', 'layout_cycle', 'join_pane_h', 'new_window_named', 'kill_session', 'layout', 'pane_jump']
 };
-export const COURSES = Object.fromEntries(Object.entries(QUESTIONS).map(([id, qs]) => [id, qs.length]));
+// 今日の達人: one question a day, out of the 達人 house's (dailyPick).
+export const DAILY = 'daily';
+export const COURSES = { ...Object.fromEntries(Object.entries(QUESTIONS).map(([id, qs]) => [id, qs.length])), [DAILY]: 1 };
 export const VER = 2;
 // Practice runs (稽古の間) are synced between devices but never ranked.
 export const PRACTICE = ['keiko'];
@@ -104,7 +107,14 @@ function pairZoom(list) {
   return out;
 }
 
+// The question of 今日の達人 on a day, as levels.js dailyPick picks it.
+export const DAILY_POOL = [...new Set(QUESTIONS.pro)];
+export function dailyPick(day) {
+  return DAILY_POOL[Math.floor(rng(day + ':daily')() * DAILY_POOL.length)];
+}
+
 export function dailyOrder(course, day) {
+  if (course === DAILY) return [dailyPick(day)];
   return pairZoom(shuffle(QUESTIONS[course].slice(), rng(day + ':' + course)));
 }
 
@@ -139,7 +149,9 @@ export function checkRun(run, now = new Date()) {
   const sum = splits.reduce((a, b) => a + b, 0);
   if (!(run.qs.reduce((a, q) => a + q.s, 0) >= MIN_AVG * n)) throw new Fail(400, 'too fast');
   if (typeof run.time !== 'number' || Math.abs(sum - run.time) > 0.05 * n + 0.2) throw new Fail(400, 'time does not add up');
-  return { n, splits, time: +run.time.toFixed(2), own: run.conf ? 1 : 0 };
+  // Whether the 手順 came out (今日の達人 is played without it): said on the board.
+  const peek = run.qs.some((q) => q.g) || (Number.isInteger(run.guides) && run.guides > 0) ? 1 : 0;
+  return { n, splits, time: +run.time.toFixed(2), own: run.conf ? 1 : 0, peek };
 }
 
 // ---- the key log ------------------------------------------------------------
