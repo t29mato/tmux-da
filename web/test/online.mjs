@@ -10,6 +10,11 @@ const { chromium } = createRequire(path.join(process.cwd(), 'noop.js'))('playwri
 import { dailyOrder, jstDay } from '../../server/src/rules.js';
 
 const API = process.env.API || 'http://localhost:8787';
+// The page sends anything else to the live server: never run against it.
+if (!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(API) && API !== 'staging') {
+  console.error('API must be a local server or "staging", not ' + API);
+  process.exit(2);
+}
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PAGE = 'file://' + path.resolve(here, '..', 'index.html') + '?api=' + encodeURIComponent(API);
 const SHOTS = process.env.SHOTS_DIR;
