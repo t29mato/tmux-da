@@ -2260,6 +2260,73 @@ async function loop9(browser) {
   await ctx.close();
 }
 
+// Coming back: yesterday's 入門 runs are in; the title says why to play
+// today (yesterday → a streak, the title held and the next one, the step up
+// to 中級, the weak spots for the 稽古) and the result says what the next
+// title needs.
+async function loop10(browser) {
+  const L = '[loop10]';
+  // Yesterday's 入門, three runs at the given times; 閉じる and ウィンドウ移動 slow.
+  const seed = (times, daysAgo = 1) => {
+    const qs = ['split_lr', 'focus', 'zoom', 'split_tb', 'close', 'unzoom', 'focus', 'new_window', 'select_window', 'split_lr', 'close', 'focus', 'zoom', 'select_window', 'split_tb'];
+    const lim = { split_lr: 7, split_tb: 7, focus: 10, zoom: 7, unzoom: 7, close: 16, new_window: 7, select_window: 7 };
+    const rank = (a) => a <= 2 ? '師範' : a <= 3 ? '師範代' : a <= 5 ? '三段' : a <= 8 ? '初段' : '見習い';
+    let best = Infinity;
+    const runs = times.map((t, i) => {
+      const log = qs.map((q) => { const s = +(t / 15 * (q === 'close' || q === 'select_window' ? 1.8 : 0.8)).toFixed(2); return { t: q, s, m: 0, l: lim[q], ...(s > lim[q] ? { o: 1 } : {}) }; });
+      const time = +log.reduce((a, q) => a + q.s, 0).toFixed(2);
+      const rec = time < best; if (rec) best = time;
+      return { id: 'y' + i, course: 'easy', ver: 2, at: new Date(Date.now() - daysAgo * 86400e3 + i * 600e3).toISOString(), prefix: 'C-b', time, raw: time, misses: 0, overs: log.filter((q) => q.o).length, guides: 0, keys: 20, n: 15, rank: rank(time / 15), rec, qs: log };
+    });
+    const b = runs.filter((r) => r.rec).slice(-1)[0];
+    return { schema: 4, prefix: 'C-b', arena: { 'tmux:easy': { time: b.time, misses: 0, date: b.at.slice(0, 10), runId: b.id, ver: 2 } }, runs };
+  };
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  ok(await page.$eval('#fine-first', (e) => !e.hidden), L + ' the first-time line shows before any run');
+  await page.evaluate((d) => localStorage.setItem('tmux-da', JSON.stringify(d)), seed([110, 92, 84]));
+  await page.reload();
+  const text = (sel) => page.$eval(sel, (e) => e.textContent).catch(() => '');
+  ok(/昨日も解いた。今日も解くと 2 日連続/.test(await text('.today-again')), L + ' the title says yesterday was played and today makes a streak');
+  ok(await page.$eval('#fine-first', (e) => e.hidden), L + ' the first-time line is gone once a run is in');
+  ok(/^三段まで あと \d+\.\d 秒$/.test(await text('[data-course="easy"] .wing-rank')), L + ' the 入門 card shows the next title and the seconds to it (' + (await text('[data-course="easy"] .wing-rank')) + ')');
+  ok(!(await page.$('[data-course="normal"] .wing-next')), L + ' 中級 is not yet the step up at 初段');
+  ok(/^苦手: (ウィンドウ移動|ペインを閉じる)$/.test(await text('#keiko-sub')), L + ' the 稽古 button names the weak spots (' + (await text('#keiko-sub')) + ')');
+  await shot(page, 'loop10-title-return');
+  // At 三段 on 入門, 中級 is the step up.
+  await page.evaluate((d) => localStorage.setItem('tmux-da', JSON.stringify(d)), seed([110, 92, 70]));
+  await page.reload();
+  ok(/^師範代まで あと \d+\.\d 秒$/.test(await text('[data-course="easy"] .wing-rank')), L + ' at 三段 the next is 師範代 (' + (await text('[data-course="easy"] .wing-rank')) + ')');
+  ok(/次はここ（入門 で 三段）/.test(await text('[data-course="normal"] .wing-next')), L + ' the 中級 card says it is the step up');
+  ok(!(await page.$('[data-course="hard"] .wing-next')), L + ' 上級 is not');
+  // Play today: the result says what the next title needs; the title then shows the streak.
+  await page.keyboard.press('Enter');
+  await playCourse(page, 'Control+b', 'C-b', L, 'guide');
+  await waitResult(page, L);
+  const nxt = await text('#result-body .em-rank small');
+  const r = (await st(page)).result;
+  ok(r.rank === '師範' ? /最高の称号/.test(nxt) : /まで あと \d+\.\d 秒（\d+ 秒以内）/.test(nxt), L + ' the result says what the next title needs (' + nxt + ')');
+  await shot(page, 'loop10-result');
+  await page.waitForTimeout(800);
+  await page.keyboard.press('Escape');
+  ok((await st(page)).screen === 'title', L + ' Esc leaves the result');
+  ok(/2 日連続/.test(await text('.today-streak')) && !(await page.$('.today-again')), L + ' after today\'s run the title shows the 2-day streak, the nudge gone');
+  ok(errors.length === 0, L + ' no page errors and no network requests' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+  // The same in English.
+  const en = await browser.newContext({ viewport: PHONE, reducedMotion: 'reduce', locale: 'en-US' });
+  const p2 = await en.newPage();
+  await p2.goto(PAGE);
+  await p2.evaluate((d) => localStorage.setItem('tmux-da', JSON.stringify(d)), seed([110, 92, 70]));
+  await p2.reload();
+  const bits = await p2.$$eval('.wing-rank, .wing-next, .today-again, #keiko-sub, .fine', (l) => l.map((e) => e.textContent));
+  ok(bits.length >= 4 && !bits.some((t) => /[ぁ-んァ-ヶ一-龠]/.test(t)), L + ' the English title has the same lines, in English (' + bits.join(' | ') + ')');
+  await shot(p2, 'loop10-title-en-phone');
+  await en.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -2296,6 +2363,7 @@ const parts = [
   ['loop7', loop7],
   ['loop8', loop8],
   ['loop9', loop9],
+  ['loop10', loop10],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
