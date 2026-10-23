@@ -788,7 +788,8 @@ async function confFidelity(browser) {
   await waitResult(page, L);
   const r = (await st(page)).result;
   ok(copyQ >= 3 && yankQ, L + ' the run had its copy questions (' + copyQ + ', yank_paste among them)');
-  ok(r.misses === 0, L + ' the guide in these keys makes no miss (' + r.misses + ')');
+  // From m0: the probes above (prefix c on a question that is not about windows) may cost one, by the day's order.
+  ok(r.misses === m0, L + ' the guide in these keys makes no miss (' + (r.misses - m0) + ')');
   ok(seenKeys.has('v') && seenKeys.has('y') && !seenKeys.has('Space') && !seenKeys.has('Enter'), L + ' the copy guide says v and y, never Space or Enter (' + [...seenKeys].join(' ') + ')');
   ok(![...seenKeys].some((k) => /emacs/.test(k)), L + ' with mode-keys vi the emacs keys are not mentioned');
   // By hand: v, End, y copies and leaves copy mode; Escape leaves too.
@@ -2414,7 +2415,8 @@ async function loop8(browser) {
   // window-status-format pads a window with no flag with one space.
   await p('c'); await p('c');
   const n = (await st(page)).windows.length;
-  const tabs = await page.$$eval('#status .st-win', (l) => l.map((e) => e.textContent));
+  // The goal's tag (ここへ) sits inside a tab when today's first question is a window.
+  const tabs = await page.$$eval('#status .st-win', (l) => l.map((e) => { const c = e.cloneNode(true); c.querySelectorAll('.goal-tag').forEach((t) => t.remove()); return c.textContent; }));
   ok(tabs.length === n && tabs.slice(0, n - 2).every((t) => /\u00a0$/.test(t)) && /-$/.test(tabs[n - 2]) && /\*$/.test(tabs[n - 1]), L + ' the tabs read 0:main␣ … 3:zsh- 4:zsh* (' + JSON.stringify(tabs) + ')');
   // choose-tree: s folds the sessions (+), w opens them (-) with the windows under them.
   await p('s');
