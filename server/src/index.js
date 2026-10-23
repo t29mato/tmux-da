@@ -171,12 +171,15 @@ async function setName(env, hash, name) {
 }
 
 // scores.own (1: the player's own .tmux.conf) came after the first boards,
-// the key logs and the published configs after them; a database from
-// before gets the column and the tables on first use (schema.sql has them too).
+// the key logs and the published configs after them, scores.peek last; a
+// database from before gets the columns and the tables on first use
+// (schema.sql has them too).
 const ownDone = new WeakSet();
 async function ownColumn(env) {
   if (ownDone.has(env.DB)) return;
   try { await env.DB.prepare('ALTER TABLE scores ADD COLUMN own INTEGER NOT NULL DEFAULT 0').run(); } catch (e) { /* already there */ }
+  // scores.peek (1: the 手順 came out) came with 今日の達人.
+  try { await env.DB.prepare('ALTER TABLE scores ADD COLUMN peek INTEGER NOT NULL DEFAULT 0').run(); } catch (e) { /* already there */ }
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS keylogs (key_hash TEXT NOT NULL, run_id TEXT NOT NULL, log TEXT NOT NULL, PRIMARY KEY (key_hash, run_id))').run();
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS confs (key_hash TEXT PRIMARY KEY, text TEXT NOT NULL, at TEXT NOT NULL)').run();
   ownDone.add(env.DB);
@@ -193,8 +196,8 @@ async function enter(env, hash, run) {
   try { log = checkLog(run); } catch (e) { console.log('refused ' + (me.name || '') + ' ' + run.course + ': ' + e.message); throw e; }
   await ownColumn(env);
   await env.DB.prepare(
-    'INSERT OR IGNORE INTO scores (run_id, key_hash, course, ver, time, day, at, splits, own) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)'
-  ).bind(run.id, hash, run.course, VER, c.time, jstDay(now), now.toISOString(), JSON.stringify(c.splits), c.own).run();
+    'INSERT OR IGNORE INTO scores (run_id, key_hash, course, ver, time, day, at, splits, own, peek) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)'
+  ).bind(run.id, hash, run.course, VER, c.time, jstDay(now), now.toISOString(), JSON.stringify(c.splits), c.own, c.peek).run();
   if (log) {
     await env.DB.prepare('INSERT OR IGNORE INTO keylogs (key_hash, run_id, log) VALUES (?1, ?2, ?3)')
       .bind(hash, run.id, JSON.stringify({ keys: log.keys, q: log.q, cut: log.cut || undefined })).run();
@@ -225,8 +228,8 @@ async function bestRows(env, q, max) {
   const w = spanWhere(q.get('span') || 'today');
   await ownColumn(env);
   const res = await env.DB.prepare(
-    'SELECT p.name, s.time, s.day, s.splits, s.at, s.own, s.run_id, s.key_hash, ' +
-    '(SELECT 1 FROM confs c WHERE c.key_hash = s.key_hash) AS conf, (SELECT 1 FROM keylogs k WHERE k.key_hash = s.key_hash AND k.run_id = s.run_id) AS haslog ' +
+    'SELECT p.name, s.time, s.day, s.splits, s.at, s.own, s.peek, s.run_id, s.key_hash, ' +
+    '(SELECT 1 FROM confs c WHERE c.key_hash = s.key_hash) AS conf, (SELECT json_array_length(k.log, \'$.keys\') FROM keylogs k WHERE k.key_hash = s.key_hash AND k.run_id = s.run_id) AS nkeys ' +
     'FROM scores s JOIN players p ON p.key_hash = s.key_hash ' +
     'WHERE s.course = ?1 AND s.ver = ?2' + w.sql + ' AND p.name IS NOT NULL ' +
     'AND s.time = (SELECT MIN(t.time) FROM scores t WHERE t.key_hash = s.key_hash AND t.course = s.course AND t.ver = s.ver' + w.sql.replace(/s\./g, 't.') + ') ' +
@@ -237,8 +240,9 @@ async function bestRows(env, q, max) {
 
 async function board(env, q) {
   const rows = await bestRows(env, q, 50);
-  // conf: the player's own .tmux.conf is published; log: this run can be watched.
-  return json({ rows: rows.map((r, i) => ({ rank: i + 1, id: r.run_id, name: r.name, time: r.time, day: r.day, own: r.own ? 1 : 0, conf: r.own && r.conf ? 1 : 0, log: r.haslog ? 1 : 0 })) }, 200, { 'Cache-Control': 'max-age=15' });
+  // conf: the player's own .tmux.conf is published; log: this run can be
+  // watched; keys: how many it pressed; peek: the 手順 came out.
+  return json({ rows: rows.map((r, i) => ({ rank: i + 1, id: r.run_id, name: r.name, time: r.time, day: r.day, own: r.own ? 1 : 0, conf: r.own && r.conf ? 1 : 0, log: r.nkeys != null ? 1 : 0, keys: r.nkeys != null ? r.nkeys : null, peek: r.peek ? 1 : 0 })) }, 200, { 'Cache-Control': 'max-age=15' });
 }
 
 // The run to race or to watch: the best of the span, the slowest one faster

@@ -4,7 +4,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import { makeD1 } from './d1.mjs';
-import { dailyOrder, jstDay } from '../src/rules.js';
+import { dailyOrder, dailyPick, jstDay } from '../src/rules.js';
 
 let env, ip = 0;
 beforeEach(() => { env = { DB: makeD1() }; });
@@ -306,4 +306,29 @@ test('replay: a ranked run by its id, with its log; nothing without a name or a 
   const anon = await player();
   await call('POST', '/v1/sync', { key: anon, runs: [human('s1', 'easy', 1)] });
   assert.equal((await call('GET', '/v1/replay?id=s1')).status, 404);
+});
+
+test('今日の達人: its own board for the day, with the keys pressed and whether the 手順 came out', async () => {
+  const a = await player('たか'), b = await player('はと');
+  const t = dailyPick(jstDay(new Date()));
+  const run = (id, s, g, keys) => ({ id, course: 'daily', ver: 2, at: new Date().toISOString(), time: s, misses: 0, keys: keys.length, qs: [{ t, s, m: 0, ...(g ? { g: 1 } : {}) }], klog: { keys, q: [0] } });
+  const ks = (n, s) => Array.from({ length: n }, (_, i) => [Math.round((i + 1) * s * 1000 / n) - (i % 3) * 7, i % 2 ? 'Enter' : 'Ctrl+b']);
+  assert.equal((await call('POST', '/v1/scores', { key: a, run: run('d1', 5.5, false, ks(9, 5.5)) })).status, 200);
+  assert.equal((await call('POST', '/v1/scores', { key: b, run: run('d2', 3.2, true, ks(12, 3.2)) })).status, 200);
+  const rows = (await call('GET', '/v1/board?course=daily&span=today')).body.rows;
+  assert.deepEqual(rows.map((r) => [r.name, r.time, r.keys, r.peek, r.log]), [['はと', 3.2, 12, 1, 1], ['たか', 5.5, 9, 0, 1]]);
+  assert.equal((await call('GET', '/v1/board?course=easy&span=today')).body.rows.length, 0, 'apart from the houses');
+  // Another day's question is refused.
+  const other = [...new Set(['join_pane', 'layout', 'rotate', 'pane_jump'])].find((x) => x !== t && ![-1, 1].some((k) => dailyPick(jstDay(new Date(Date.now() + k * 86400000))) === x));
+  assert.equal((await call('POST', '/v1/scores', { key: a, run: { ...run('d3', 2, false, ks(9, 2)), qs: [{ t: other, s: 2, m: 0 }] } })).status, 400);
+  // The 達人 house is a course of the boards too.
+  assert.equal((await call('POST', '/v1/scores', { key: a, run: human('p1', 'pro', 2.5) })).status, 200);
+  assert.equal((await call('GET', '/v1/board?course=pro&span=today')).body.rows.length, 1);
+});
+
+test('scores: a database from before the peek column gets it on first use', async () => {
+  env.DB.raw.exec('DROP TABLE scores; CREATE TABLE scores (run_id TEXT NOT NULL, key_hash TEXT NOT NULL, course TEXT NOT NULL, ver INTEGER NOT NULL, time REAL NOT NULL, day TEXT NOT NULL, at TEXT NOT NULL, splits TEXT NOT NULL, own INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (key_hash, run_id))');
+  const key = await player('ふるい');
+  assert.equal((await call('POST', '/v1/scores', { key, run: human('m1', 'easy', 1) })).status, 200);
+  assert.deepEqual((await call('GET', '/v1/board?course=easy&span=today')).body.rows.map((r) => [r.name, r.peek, r.keys]), [['ふるい', 0, null]]);
 });

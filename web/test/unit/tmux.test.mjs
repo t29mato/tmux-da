@@ -152,3 +152,131 @@ test('arrowPath: the way tmux walks it, never swinging back and forth', () => {
   assert.equal(T.neighbour(win, COLS, ROWS, 'U', true, wide, mid).id, mid);
   assert.equal(T.neighbour(win, COLS, ROWS, 'U', true, wide, goal).id, goal);
 });
+
+// ---- 達人: layouts, join-pane, swap-window, move-window, rotate -D ----------
+// The numbers below were read off a real tmux 3.8 (tmux -L test -f /dev/null,
+// new-session -x 100 -y 30, then select-layout): pane x,y w×h in pane order.
+
+function panes(n) {
+  const s = T.createSession({ name: 't' });
+  const w = T.createWindow(s, 'z');
+  for (let i = 1; i < n; i++) T.splitPane(w, T.panesOf(w)[0].id, 'tb', null, true);
+  return { s, w };
+}
+const rects = (w, C, R) => T.layout(w, C, R).panes.slice().sort((a, b) => T.panesOf(w).indexOf(a.pane) - T.panesOf(w).indexOf(b.pane)).map((r) => `${r.x},${r.y} ${r.w}x${r.h}`).join(' ');
+
+test('select-layout: every layout sized as tmux 3.8 sizes it', () => {
+  const real = [
+    [4, 'even-horizontal', 80, 24, '0,0 20x24 21,0 19x24 41,0 19x24 61,0 19x24'],
+    [4, 'even-vertical', 80, 24, '0,0 80x6 0,7 80x5 0,13 80x5 0,19 80x5'],
+    [6, 'even-horizontal', 100, 30, '0,0 16x30 17,0 16x30 34,0 16x30 51,0 16x30 68,0 16x30 85,0 15x30'],
+    [3, 'even-vertical', 100, 30, '0,0 100x10 0,11 100x9 0,21 100x9'],
+    [3, 'tiled', 100, 30, '0,0 49x14 50,0 50x14 0,15 100x15'],
+    [5, 'tiled', 100, 30, '0,0 49x9 50,0 50x9 0,10 49x9 50,10 50x9 0,20 100x10'],
+    [7, 'tiled', 100, 30, '0,0 32x9 33,0 32x9 66,0 34x9 0,10 32x9 33,10 32x9 66,10 34x9 0,20 100x10'],
+    [4, 'tiled', 80, 24, '0,0 39x11 40,0 40x11 0,12 39x12 40,12 40x12'],
+    [5, 'main-horizontal', 100, 30, '0,0 100x24 0,25 25x5 26,25 24x5 51,25 24x5 76,25 24x5'],
+    [5, 'main-vertical', 100, 30, '0,0 80x30 81,0 19x7 81,8 19x7 81,16 19x7 81,24 19x6'],
+    [6, 'main-horizontal-mirrored', 100, 30, '0,6 100x24 0,0 20x5 21,0 19x5 41,0 19x5 61,0 19x5 81,0 19x5'],
+    [6, 'main-vertical-mirrored', 100, 30, '20,0 80x30 0,0 19x6 0,7 19x5 0,13 19x5 0,19 19x5 0,25 19x5']
+  ];
+  for (const [n, name, C, R, want] of real) {
+    const { w } = panes(n);
+    assert.equal(T.applyLayout(w, name), true);
+    assert.equal(rects(w, C, R), want, n + ' panes, ' + name);
+    assert.equal(w.layoutName, name);
+  }
+});
+
+test('next-layout: tmux 3.8\'s order of seven, going on from the last one set through splits and closes', () => {
+  assert.deepEqual(plain(T.LAYOUTS), ['even-horizontal', 'even-vertical', 'main-horizontal', 'main-horizontal-mirrored', 'main-vertical', 'main-vertical-mirrored', 'tiled']);
+  assert.deepEqual(plain(T.LAYOUT_KEYS.slice(0, 5)), ['even-horizontal', 'even-vertical', 'main-horizontal', 'main-vertical', 'tiled'], 'prefix M-1 … M-5');
+  const { w } = panes(3);
+  T.nextLayout(w);
+  assert.equal(w.layoutName, 'even-horizontal', 'none set yet: the first');
+  T.applyLayout(w, 'even-vertical');
+  T.splitPane(w, w.active, 'lr', null, true);
+  assert.equal(w.layoutName, null, 'a split leaves the layout');
+  T.nextLayout(w);
+  assert.equal(w.layoutName, 'main-horizontal', 'but next-layout goes on from even-vertical, as tmux does');
+  T.nextLayout(w, true);
+  assert.equal(w.layoutName, 'even-vertical', 'previous-layout');
+  T.applyLayout(w, 'tiled');
+  T.nextLayout(w);
+  assert.equal(w.layoutName, 'even-horizontal', 'round again');
+});
+
+test('a resize inside a layout moves the border by the cells asked, mirrored ones the other way', () => {
+  const { w } = panes(3);
+  T.applyLayout(w, 'main-vertical-mirrored');
+  const main = T.panesOf(w)[0];
+  assert.equal(T.rectOf(w, main.id, 100, 30).x, 20);
+  T.resizePane(w, main.id, 'lr', -5, 100, 30);
+  assert.equal(T.rectOf(w, main.id, 100, 30).w, 85, 'resize-pane -L on the right-hand main pane widens it');
+  assert.equal(T.rectOf(w, main.id, 100, 30).x, 15);
+});
+
+test('rotate-window -D: the contents move down one place, the focus stays put', () => {
+  const s = T.createSession({ name: 't' });
+  const w = T.createWindow(s, 'z');
+  const a = w.active, b = T.splitPane(w, a, 'lr', null, true).id, c = T.splitPane(w, b, 'tb', null, true).id;
+  T.selectPane(w, b);
+  T.rotateWindow(w);
+  assert.deepEqual(plain(T.panesOf(w).map((p) => p.id)), [b, c, a], 'C-o: the first goes to the end (tmux: %1 %2 %0)');
+  assert.equal(w.active, c, 'the focus stays at the place: the pane that moved in');
+  T.rotateWindow(w, true);
+  assert.deepEqual(plain(T.panesOf(w).map((p) => p.id)), [a, b, c], 'M-o turns it back');
+  assert.equal(w.active, b);
+});
+
+test('join-pane: the pane leaves its window (gone when empty) and splits the target, below or to the right, and takes the focus', () => {
+  const s = T.createSession({ name: 't' });
+  const main = T.createWindow(s, 'main');
+  T.selectWindow(s, main.id);
+  const left = main.active;
+  const right = T.splitPane(main, left, 'lr', null, false).id;
+  const logs = T.createWindow(s, 'logs');
+  const l2 = T.splitPane(logs, logs.active, 'tb', null, false).id;
+  const build = T.createWindow(s, 'build');
+  const lone = build.active;
+  // tmux: join-pane -s 2 → 0:main panes=3, the new one below the active pane, active; window 2 gone.
+  assert.ok(T.joinPane(s, build, lone, main, right, 'tb', false, false));
+  assert.equal(T.windowById(s, build.id), null, 'a window left with no pane closes');
+  assert.deepEqual(plain(T.panesOf(main).map((p) => p.id)), [left, right, lone]);
+  assert.equal(main.active, lone);
+  assert.equal(rects(main, 80, 24), '0,0 40x24 41,0 39x12 41,13 39x11', 'as tmux: 0,0 40x24 41,0 39x12 41,13 39x11');
+  // join-pane -h -s :1 → to the right of the active pane (19 + 19 in tmux).
+  assert.ok(T.joinPane(s, logs, l2, main, lone, 'lr', false, false));
+  assert.equal(rects(main, 80, 24), '0,0 40x24 41,0 39x12 41,13 19x11 61,13 19x11');
+  assert.equal(T.panesOf(logs).length, 1, 'the other window keeps its other pane');
+  // -d: the focus stays; the same pane twice is refused.
+  assert.ok(T.joinPane(s, logs, logs.active, main, left, 'tb', true, true));
+  assert.equal(main.active, l2);
+  assert.equal(T.joinPane(s, main, left, main, left, 'tb'), null);
+});
+
+test('swap-window: numbers trade; tmux 3.8 keeps the current number current unless -d', () => {
+  const mk = () => {
+    const s = T.createSession({ name: 't' });
+    const ws = ['main', 'logs', 'build'].map((n) => T.createWindow(s, n));
+    T.selectWindow(s, ws[1].id); T.selectWindow(s, ws[2].id);
+    return { s, ws };
+  };
+  const names = (s) => s.windows.map((w) => w.index + ':' + w.name + (w.id === s.active ? '*' : w.id === s.last ? '-' : '')).join(' ');
+  let { s, ws } = mk();
+  T.swapWindows(s, ws[2].id, ws[0].id, false);
+  assert.equal(names(s), '0:build 1:logs- 2:main*', 'tmux: 0:build 1:logs- 2:main*');
+  ({ s, ws } = mk());
+  T.swapWindows(s, ws[2].id, ws[0].id, true);
+  assert.equal(names(s), '0:build* 1:logs 2:main-', 'with -d, tmux: 0:build* 1:logs 2:main-');
+});
+
+test('move-window: to a free number only ("index in use"), -r closes the gaps', () => {
+  const s = T.createSession({ name: 't' });
+  const ws = ['main', 'logs', 'build'].map((n) => T.createWindow(s, n));
+  assert.equal(T.moveWindow(s, ws[2].id, 1), false, 'index in use');
+  assert.equal(T.moveWindow(s, ws[2].id, 6), true);
+  assert.deepEqual(plain(s.windows.map((w) => w.index + ':' + w.name)), ['0:main', '1:logs', '6:build']);
+  T.renumberWindows(s);
+  assert.deepEqual(plain(s.windows.map((w) => w.index)), [0, 1, 2]);
+});

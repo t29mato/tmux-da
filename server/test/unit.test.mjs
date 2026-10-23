@@ -2,7 +2,7 @@
 //   node --test server/test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeKey, cleanName, checkRun, cleanRun, jstDay, dailyOrder, orderDays, QUESTIONS, COURSES, MIN_Q, MIN_AVG, PAUSE_MAX, NAME_MAX } from '../src/rules.js';
+import { normalizeKey, cleanName, checkRun, cleanRun, jstDay, dailyOrder, dailyPick, orderDays, QUESTIONS, COURSES, MIN_Q, MIN_AVG, PAUSE_MAX, NAME_MAX } from '../src/rules.js';
 import { load, plain } from '../../web/test/unit/load.mjs';
 
 // A run on today's order of the course (`n` questions of it: a short run
@@ -211,4 +211,25 @@ test('checkLog: a script\'s hands are refused, a quick hand is not', () => {
   assert.ok(checkLog(quick));
   const gaps = quick.klog.keys.slice(1).map((e, i) => e[0] - quick.klog.keys[i][0]);
   assert.ok(Math.min(...gaps) >= 15, 'the recorded expert never pressed two keys within 15 ms (' + Math.min(...gaps) + ')');
+});
+
+test('今日の達人: the day\'s question is the one levels.js picks, every day', () => {
+  const LV = load(['i18n.js', 'levels.js']).ADV.levels;
+  for (let d = 0; d < 400; d++) {
+    const day = new Date(Date.UTC(2026, 0, 1) + d * 86400000).toISOString().slice(0, 10);
+    assert.equal(dailyPick(day), LV.dailyPick(day), day);
+  }
+  assert.deepEqual(dailyOrder('daily', '2026-10-24'), [dailyPick('2026-10-24')]);
+  assert.equal(COURSES.daily, 1);
+});
+
+test('checkRun: 今日の達人 takes the day\'s question only, and says whether the 手順 came out', () => {
+  const day = jstDay(new Date());
+  const ok = { id: 'r_d', course: 'daily', ver: 2, time: 4.2, qs: [{ t: dailyPick(day), s: 4.2, m: 0 }] };
+  assert.deepEqual([checkRun(ok).n, checkRun(ok).peek], [1, 0]);
+  assert.equal(checkRun({ ...ok, qs: [{ ...ok.qs[0], g: 1 }] }).peek, 1, 'the 手順 came out: marked');
+  // A question no day near now asks.
+  const other = QUESTIONS.pro.find((t) => ![-1, 0, 1].some((k) => dailyPick(jstDay(new Date(Date.now() + k * 86400000))) === t));
+  assert.throws(() => checkRun({ ...ok, qs: [{ t: other, s: 4.2, m: 0 }] }), /not today's order/);
+  assert.throws(() => checkRun({ ...ok, qs: [ok.qs[0], ok.qs[0]], time: 8.4 }), /bad questions/);
 });

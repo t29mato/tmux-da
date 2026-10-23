@@ -325,6 +325,20 @@ test('streak: days in a row (Japan time), alive until midnight even before today
   assert.deepEqual(plain(REC.streak(null, new Date('2026-10-24T05:00:00Z'))), { days: 0, today: false });
 });
 
+test('今日の達人 keeps its own streak, gets no title or 免状, and stays out of the 腕前', () => {
+  const REC = fresh();
+  const daily = (at) => ({ course: 'daily', prefix: 'C-b', time: 4, raw: 4, misses: 0, overs: 0, guides: 0, keys: 9, n: 1, qs: [{ t: 'layout', s: 4, m: 0, p: 2 }], at });
+  REC.add(daily('2026-10-20T03:00:00Z'));
+  REC.add(daily('2026-10-21T03:00:00Z'));
+  REC.add(run(40, { at: '2026-10-21T04:00:00Z' }));
+  const now = new Date('2026-10-21T05:00:00Z');
+  assert.deepEqual(plain(REC.streak(null, now, 'daily')), { days: 2, today: true });
+  assert.deepEqual(plain(REC.streak(null, now)), { days: 1, today: true }, 'the houses\' streak does not count it');
+  assert.equal(REC.bestTitle('daily'), null, 'one question is no run of a house: no title');
+  assert.equal(REC.skill().runs, 1, 'nor a 腕前');
+  assert.equal(REC.courseOf('daily').id, 'daily');
+});
+
 // ---- 稽古 (the recall drill) ----------------------------------------------------
 
 test('drillWeight: frequency times weakness; unseen types weigh double, a type just asked weighs half', () => {

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS scores (
   at       TEXT NOT NULL,
   splits   TEXT NOT NULL,        -- JSON: seconds per question, penalties included
   own      INTEGER NOT NULL DEFAULT 0,  -- 1: on the player's own .tmux.conf
+  peek     INTEGER NOT NULL DEFAULT 0,  -- 1: the 手順 came out (今日の達人 is played without it)
   PRIMARY KEY (key_hash, run_id)
 );
 CREATE INDEX IF NOT EXISTS scores_board ON scores (course, ver, day, time);

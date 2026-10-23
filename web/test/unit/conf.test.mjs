@@ -111,7 +111,7 @@ test('everything else is listed with a reason, never dropped silently: 未対応
     'bind -T popup q kill-pane',
     'if-shell "test -f ~/.local.conf" "source ~/.local.conf"',
     'run "~/bin/something"',
-    'bind Q kill-session'
+    'bind Q display-popup -E'
   ].join('\n'));
   assert.equal(c.used.length, 0);
   // 関係ない: the look and the plugin's own option. 未対応: what tmux does and the game cannot.
@@ -123,14 +123,14 @@ test('everything else is listed with a reason, never dropped silently: 未対応
 });
 
 test('a key bound to something the game lacks does nothing: no fall-back to the default', () => {
-  const c = C.parse('bind = select-layout tiled\nbind -n M-s setw synchronize-panes\nbind S choose-tree -w');
+  const c = C.parse('bind = display-popup -E "lazygit"\nbind -n M-s set -g mouse on\nbind S choose-tree -w');
   const eq = C.lookup(c, 'prefix', ev('='));
   assert.ok(eq && eq.act.none, '= is bound, to nothing the game can do');
   assert.ok(C.overridden(c, ev('=')), 'so choose-buffer is gone from =');
   assert.ok(C.lookup(c, 'root', ev('ß', { alt: true, code: 'KeyS' })).act.none);
   assert.equal(C.lookup(c, 'prefix', ev('S', { shift: true })).act.key, 'w', 'choose-tree -w opens the tree with the windows');
   assert.equal(c.unsupported.length, 2);
-  assert.ok(/select-layout/.test(c.unsupported[0].why));
+  assert.ok(/display-popup/.test(c.unsupported[0].why));
 });
 
 test('the prefix key bound in the prefix table: last-window runs, send-prefix sends', () => {
@@ -243,4 +243,33 @@ test('an empty file is the defaults', () => {
   const c = C.parse('');
   assert.equal(c.custom, false);
   assert.equal(c.prefix.label, 'Ctrl+b');
+});
+
+test('the 達人 commands bound to keys: layouts, rotate -D, synchronize-panes, join / move prompts, swap and move', () => {
+  const c = C.parse([
+    'bind = select-layout tiled',
+    'bind M-9 select-layout main-vertical-mirrored',
+    'bind S setw synchronize-panes \\; display "sync #{?pane_synchronized,on,off}"',
+    'bind J command-prompt -p "join pane from:" "join-pane -s \'%%\'"',
+    'bind m command-prompt -p "move window to:" "move-window -t \'%%\'"',
+    'bind -r < swap-window -d -t -1',
+    'bind R move-window -r',
+    'bind O rotate-window -D',
+    'bind @ join-pane -h -s :2',
+    'bind K kill-session'
+  ].join('\n'));
+  assert.equal(c.unsupported.length, 0, c.unsupported.map((u) => u.line + ': ' + u.why).join(' | '));
+  const at = (k, m) => plain(C.lookup(c, 'prefix', ev(k, m)).act);
+  assert.deepEqual([at('=').key, at('=').alt], ['5', true], 'tiled is prefix M-5');
+  assert.equal(at('9', { alt: true, code: 'Digit9' }).key, '7', 'main-vertical-mirrored is prefix M-7');
+  assert.deepEqual(at('S', { shift: true }).argv, ['setw', 'synchronize-panes'], 'the first command counts');
+  const j = at('J', { shift: true });
+  assert.deepEqual([j.run, j.label, j.tpl], ['prompt', 'join pane from:', "join-pane -s '%%'"]);
+  assert.equal(at('m').run, 'prompt');
+  assert.deepEqual(plain(C.lookup(c, 'prefix', ev('<', { shift: true })).repeat), true);
+  assert.deepEqual(at('<', { shift: true }).argv, ['swap-window', '-d', '-t', '-1']);
+  assert.deepEqual(at('O', { shift: true }), { key: 'o', alt: true, say: 'ペインを逆向きに回す' });
+  assert.equal(at('@', { shift: true }).run, 'cmd');
+  assert.equal(at('K', { shift: true }).run, 'cmd');
+  assert.deepEqual(plain(C.flags(['join-pane', '-hd', '-s', '2.1']).f), { h: true, d: true, s: '2.1' });
 });
