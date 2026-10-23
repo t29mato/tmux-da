@@ -100,7 +100,7 @@ test('neighbour: noWrap stops at the edge (the 指南 never points round it)', (
   assert.equal(go(h.win, 'L', true), h.left);
 });
 
-test('breakPane: the pane leaves for a window of its own, which becomes current; one pane cannot be broken', () => {
+test('breakPane: the pane leaves for a window of its own, which becomes current; a window of one pane only moves to the next free index', () => {
   const s = T.createSession({ name: 't', baseIndex: 0, paneBaseIndex: 0 });
   const w0 = T.createWindow(s, 'main');
   T.selectWindow(s, w0.id);
@@ -116,6 +116,11 @@ test('breakPane: the pane leaves for a window of its own, which becomes current;
   assert.equal(w0.active, left);
   assert.equal(w0.zoomed, false, 'the zoom is cleared');
   assert.equal(fresh.index, 1);
-  assert.equal(T.breakPane(s, fresh, right), null, 'a window of one pane stays as it is');
+  // tmux 3.x: windows 0,1 and break-pane in 1 → windows 0,2 (the same window).
+  assert.equal(T.breakPane(s, fresh, right), fresh, 'a window of one pane is handed back');
   assert.equal(s.windows.length, 2);
+  assert.equal(fresh.index, 2, 'it took the next free index');
+  assert.deepEqual(plain(s.windows.map((w) => w.index)), [0, 2]);
+  assert.equal(s.active, fresh.id);
+  assert.equal(T.freeIndex(s), 1, 'new-window would fill the gap');
 });

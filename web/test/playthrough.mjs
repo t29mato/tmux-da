@@ -1347,7 +1347,7 @@ async function qa(browser) {
   await p('['); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Home'); await page.keyboard.press('Space'); await page.keyboard.press('End'); await page.keyboard.press('Enter');
   ok((await st(page)).clipboard === 'hello-buffer', L + ' ↑, Home, Space, End, Enter copies the line above (' + JSON.stringify((await st(page)).clipboard) + ')');
   await p('#');
-  ok(/buffer0000/.test(await status()), L + ' # lists it');
+  ok(/buffer0: 12 bytes/.test(await status()), L + ' # lists it as tmux does (buffer0: N bytes)');
   await p('=');
   ok(!!(await page.$('#term .picker')), L + ' = opens the buffer list');
   await page.keyboard.press('Enter');
@@ -2138,6 +2138,60 @@ async function loop7(browser) {
 }
 const LV_PEEK_MS = 4300;
 
+// Round 8: what a tmux user checks against a real tmux 3.x: the status
+// line's date and padding, the choose-tree with w, buffer names, the
+// emacs copy end, break-pane on a window of one pane.
+async function loop8(browser) {
+  const L = '[loop8]';
+  const status = () => page.$eval('#status', (e) => e.textContent);
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#btn-enter');
+  await waitPlay(page);
+  const p = async (k) => { await page.keyboard.press('Control+b'); await page.keyboard.press(k); };
+  // status-right: "host" %H:%M %d-%b-%y
+  ok(/"dojo"\d\d:\d\d \d\d-[A-Z][a-z]{2}-\d\d$/.test((await status()).trim()), L + ' the status bar ends with the clock and the date as status-right does (' + (await status()).trim().slice(-22) + ')');
+  // window-status-format pads a window with no flag with one space.
+  await p('c'); await p('c');
+  const n = (await st(page)).windows.length;
+  const tabs = await page.$$eval('#status .st-win', (l) => l.map((e) => e.textContent));
+  ok(tabs.length === n && tabs.slice(0, n - 2).every((t) => /\u00a0$/.test(t)) && /-$/.test(tabs[n - 2]) && /\*$/.test(tabs[n - 1]), L + ' the tabs read 0:main␣ … 3:zsh- 4:zsh* (' + JSON.stringify(tabs) + ')');
+  // choose-tree: s folds the sessions (+), w opens them (-) with the windows under them.
+  await p('s');
+  let rows = await page.$$eval('#term .picker-row', (l) => l.map((e) => e.textContent));
+  ok(rows.length === 1 && rows[0] === '(0) + dojo: ' + n + ' windows (attached)', L + ' s lists the session folded, as choose-tree -s does (' + JSON.stringify(rows) + ')');
+  await page.keyboard.press('Escape');
+  await p('w');
+  rows = await page.$$eval('#term .picker-row', (l) => l.map((e) => (e.classList.contains('on') ? '>' : ' ') + e.textContent));
+  ok(rows.length === n + 1 && rows[0] === ' (0) - dojo: ' + n + ' windows (attached)' && /^ \(1\) ├─→ \+ 0: main: "dojo"$/.test(rows[1]) && /^ \(\d\) ├─→ \+ \d: zsh-: "dojo"$/.test(rows[n - 1]) && /^>\(\d\) └─→ \+ \d: zsh\*: "dojo"$/.test(rows[n]),
+    L + ' w opens the tree with the windows and their flags, on the current window (' + JSON.stringify(rows) + ')');
+  await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Enter');
+  ok((await st(page)).activeIndex === n - 3 && !(await page.$('#term .picker')), L + ' Enter on a window row goes to that window (' + (await st(page)).activeIndex + ')');
+  await shot(page, 'loop8-tree');
+  // The emacs copy (M-w) stops before the cursor; vi's Enter takes the cursor cell.
+  await page.keyboard.type('echo hello-buffer'); await page.keyboard.press('Enter');
+  await p('['); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Home'); await page.keyboard.press('Control+Space'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('Alt+w');
+  ok((await st(page)).clipboard === 'he', L + ' C-Space → → M-w copies "he", the cursor cell left out as in tmux (' + JSON.stringify((await st(page)).clipboard) + ')');
+  await p('['); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Home'); await page.keyboard.press('Space'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('Enter');
+  ok((await st(page)).clipboard === 'hel', L + ' Space → → Enter copies "hel", the cursor cell in (' + JSON.stringify((await st(page)).clipboard) + ')');
+  await p('#');
+  ok(/buffer0: 3 bytes: "hel"/.test(await status()), L + ' # names it buffer0 (' + (await status()).trim() + ')');
+  await p('=');
+  ok(/\(0\) buffer0: \d\d:\d\d: hel$/.test(await page.$eval('#term .picker-row', (e) => e.textContent)), L + ' = lists it as choose-buffer does (name: time: text)');
+  await page.keyboard.press('Escape');
+  // break-pane on a window of one pane: the window moves to the next free index (tmux 3.x).
+  await p(String(n - 1));
+  let w = (await st(page)).windows;
+  ok(w.map((x) => x.index).join(',') === '0,1,2,3,4' && w[n - 1].active && w[n - 1].panes === 1, L + ' window 4 has one pane');
+  await p('!');
+  w = (await st(page)).windows;
+  ok(w.map((x) => x.index).join(',') === '0,1,2,3,5' && w[n - 1].active && /ウィンドウの番号が 5 に変わっただけ/.test(await status()), L + ' ! on it gives the window number 5 and says so (' + w.map((x) => x.index).join(',') + ' / ' + (await status()).trim() + ')');
+  ok(errors.length === 0, L + ' no page errors (' + errors.join('; ') + ')');
+  await ctx.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -2172,6 +2226,7 @@ const parts = [
   ['loop5', loop5],
   ['loop6', loop6],
   ['loop7', loop7],
+  ['loop8', loop8],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
