@@ -1995,8 +1995,9 @@
         var p = T.activePane(T.activeWindow(S.session));
         if (p.mode !== 'copy') return mv(['['], '[ を押す（コピーモードに入る）');
         if (lineWhere(p, S.q0.ln) === 'below') {
-          // Pages below (g, a pane of one row): leaving and coming back is quicker than paging down.
-          if (linePages(p, S.q0.ln) > 2) return mv(['q'], 'q で抜ける（[ で入り直すと、一番下に戻る）', true);
+          // Many pages below (a pane of one row pages a line at a time):
+          // leaving and coming back is quicker than paging down.
+          if (linePages(p, S.q0.ln) > 6) return mv(['q'], 'q で抜ける（[ で入り直すと、一番下に戻る）', true);
           return mv(['PageDown'], 'PageDown を押す（行き過ぎた。1 ページ下へ）', true);
         }
         return mv(['PageUp'], 'PageUp を押す（1 ページ上へ。印の行が見えるまで）', true);
