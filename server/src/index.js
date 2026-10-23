@@ -12,6 +12,7 @@
 //   GET  /v1/ghost?course=&span=        → { name, time, splits, keys } the run to race
 //                  &above=<time>       …the slowest run faster than that (1 つ上の人)
 //                  &name=<name>        …that player's best (この回を見る)
+//   GET  /v1/replay?id=                 → { name, course, day, time, splits, keys } a ranked run to watch (?watch= links)
 //   POST /v1/conf   { key, text }       → { shared }         publish (or, empty, withdraw) the .tmux.conf
 //   GET  /v1/conf?name=                 → { name, text, at } a published .tmux.conf
 //   POST /v1/ev     { v, e, c, n }      → 204                one step of a visit (counts only)
@@ -81,6 +82,7 @@ async function route(req, env) {
   if (req.method === 'GET' && p === '/v1/ghost') return ghost(env, url.searchParams);
   if (req.method === 'GET' && p === '/v1/stats') return stats(env, url.searchParams);
   if (req.method === 'GET' && p === '/v1/conf') return getConf(env, url.searchParams);
+  if (req.method === 'GET' && p === '/v1/replay') return replay(env, url.searchParams);
   if (req.method !== 'POST') throw new Fail(404, 'not found');
   const name = { '/v1/keys': 'keys', '/v1/sync': 'sync', '/v1/name': 'name', '/v1/scores': 'scores', '/v1/ev': 'ev', '/v1/conf': 'conf' }[p];
   if (!name) throw new Fail(404, 'not found');
@@ -236,7 +238,7 @@ async function bestRows(env, q, max) {
 async function board(env, q) {
   const rows = await bestRows(env, q, 50);
   // conf: the player's own .tmux.conf is published; log: this run can be watched.
-  return json({ rows: rows.map((r, i) => ({ rank: i + 1, name: r.name, time: r.time, day: r.day, own: r.own ? 1 : 0, conf: r.own && r.conf ? 1 : 0, log: r.haslog ? 1 : 0 })) }, 200, { 'Cache-Control': 'max-age=15' });
+  return json({ rows: rows.map((r, i) => ({ rank: i + 1, id: r.run_id, name: r.name, time: r.time, day: r.day, own: r.own ? 1 : 0, conf: r.own && r.conf ? 1 : 0, log: r.haslog ? 1 : 0 })) }, 200, { 'Cache-Control': 'max-age=15' });
 }
 
 // The run to race or to watch: the best of the span, the slowest one faster
@@ -252,6 +254,21 @@ async function ghost(env, q) {
   const rank = rows.indexOf(r) + 1;
   const log = await env.DB.prepare('SELECT log FROM keylogs WHERE key_hash = ?1 AND run_id = ?2').bind(r.key_hash, r.run_id).first();
   return json({ ghost: { name: r.name, time: r.time, day: r.day, rank, own: r.own ? 1 : 0, conf: r.own && r.conf ? 1 : 0, splits: JSON.parse(r.splits), keys: log ? JSON.parse(log.log) : null } }, 200, { 'Cache-Control': 'max-age=15' });
+}
+
+// One ranked run by its id, for a shared ?watch= link: only what the boards
+// show already (a named player's run) and its key log.
+async function replay(env, q) {
+  const id = q.get('id') || '';
+  if (!/^[\w-]{1,40}$/.test(id)) throw new Fail(400, 'bad id');
+  await ownColumn(env);
+  const r = await env.DB.prepare(
+    'SELECT p.name, s.course, s.time, s.day, s.splits, s.own, s.key_hash, (SELECT 1 FROM confs c WHERE c.key_hash = s.key_hash) AS conf, k.log ' +
+    'FROM scores s JOIN players p ON p.key_hash = s.key_hash LEFT JOIN keylogs k ON k.key_hash = s.key_hash AND k.run_id = s.run_id ' +
+    'WHERE s.run_id = ?1 AND s.ver = ?2 AND p.name IS NOT NULL LIMIT 1'
+  ).bind(id, VER).first();
+  if (!r) throw new Fail(404, 'no run');
+  return json({ id, name: r.name, course: r.course, time: r.time, day: r.day, own: r.own ? 1 : 0, conf: r.own && r.conf ? 1 : 0, splits: JSON.parse(r.splits), keys: r.log ? JSON.parse(r.log) : null }, 200, { 'Cache-Control': 'max-age=60' });
 }
 
 // ---- published .tmux.conf ----------------------------------------------------

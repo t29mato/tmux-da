@@ -34,13 +34,14 @@ for (const fn of ['newContext', 'newPage']) {
   const orig = browser[fn].bind(browser);
   browser[fn] = (o = {}) => orig({ locale: 'ja-JP', ...o });
 }
-const open = async () => {
+// `watch`: open on a shared ?watch=<run id> link.
+const open = async (watch) => {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, reducedMotion: 'reduce' });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-  await page.goto(PAGE);
+  await page.goto(PAGE + (watch ? '&watch=' + encodeURIComponent(watch) : ''));
   return { page, errors };
 };
 const tab = async (page, t) => { await page.click('[data-rec-tab="' + t + '"]'); };
@@ -173,6 +174,23 @@ const ra = await playByGuide(A.page, 'easy', 'Control+b', [600, 900]);
 ok(ra.board.state === 'ok', 'A: a run played by hand enters the board (' + JSON.stringify(ra.board) + ')');
 if (ra.board.state !== 'ok') process.exit(1);
 ok(ra.qlog.every((q) => typeof q.p === 'number'), 'A: every question has its fewest keys on the result');
+// The shared link: in the share text and under この回を見る, and it opens the replay for anyone.
+const shareTxt = await A.page.$eval('#result-body .share-text', (e) => e.textContent);
+const watchUrl = 'https://t29mato.github.io/games/tmux-dojo/?watch=' + ra.runId;
+ok(shareTxt.indexOf(watchUrl) >= 0 && /🟩|🟨|🟥/.test(shareTxt), 'A: the share text carries the squares and the watch link: ' + watchUrl);
+ok(await A.page.$eval('#result-body .watch-link a', (a) => a.getAttribute('href')) === watchUrl, 'A: the link is shown under この回を見る with リンクを写す');
+const W = await open(ra.runId);
+await W.page.waitForFunction(() => window.tmuxDa.state().replay, null, { timeout: 15000 });
+await W.page.waitForTimeout(1200);
+const wr = (await state(W.page)).replay;
+ok(wr.who === name && wr.playing && wr.i > 0 && !wr.lost, 'W: a fresh browser opened on ?watch=<id> goes straight into the replay of A\'s run (' + wr.i + '/' + wr.n + ' keys fed)');
+if (SHOTS) await W.page.screenshot({ path: SHOTS + '/online-watch-link.png' });
+await W.page.keyboard.press('Escape');
+ok((await state(W.page)).screen === 'title', 'W: Esc leaves to the title');
+const WX = await open('r_nope');
+await WX.page.waitForTimeout(2500);
+ok((await state(WX.page)).screen === 'title' && !(await state(WX.page)).replay, 'W: an unknown id stays on the title');
+await WX.page.context().close();
 
 // E: a fresh device races today's #1 (A) and sees its keys.
 const E = await open();
@@ -266,6 +284,13 @@ const rp2 = (await state(E.page)).replay;
 ok(!rp2.lost && (await state(E.page)).conf && (await state(E.page)).conf.prefix === 'Ctrl+a', 'E: A\'s own-config run replays on A\'s published file (' + rp2.i + ' keys, lost ' + rp2.lost + ')');
 await E.page.keyboard.press('Escape');
 
+// The link to A's own-config run: the published file comes first, then the replay starts by itself.
+const W2 = await open(rc.runId);
+await W2.page.waitForFunction(() => { const s = window.tmuxDa.state(); return s.replay && s.replay.i > 3; }, null, { timeout: 20000 });
+const w2 = await state(W2.page);
+ok(w2.replay.who === name && !w2.replay.lost && w2.conf && w2.conf.prefix === 'Ctrl+a', 'W2: ?watch= of an own-config run replays on the published file');
+await W2.page.context().close();
+
 // A takes the file down: the link goes.
 await A.page.click('[data-conf-unshare]');
 await A.page.waitForFunction(() => ADV.net.state().confShared === false, null, { timeout: 20000 }).catch(async (e) => {
@@ -278,7 +303,7 @@ await E.page.waitForSelector('.rec-table.board tbody tr');
 ok(await E.page.$('.rec-table.board [data-conf-of="' + name + '"]') === null, 'E: after 公開をやめる the board has no link to the file');
 
 // The unknown 合言葉 above is a 404 on purpose; anything else is a fault.
-const errs = A.errors.concat(B.errors, D.errors, E.errors).filter((e) => !/status of 404/.test(e));
+const errs = A.errors.concat(B.errors, D.errors, E.errors, W.errors).filter((e) => !/status of 404/.test(e));
 ok(errs.length === 0, 'no page errors' + (errs.length ? ': ' + errs.join(' | ') : ''));
 await browser.close();
 console.log(failed ? failed + ' FAILED' : 'all passed');

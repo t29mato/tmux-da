@@ -292,3 +292,18 @@ test('a database from before the key logs and the configs gets their tables on f
   assert.equal((await call('GET', '/v1/board?course=easy&span=today')).body.rows[0].log, 1);
   assert.equal((await call('POST', '/v1/conf', { key, text: 'bind x kill-pane' })).body.shared, true);
 });
+
+test('replay: a ranked run by its id, with its log; nothing without a name or a wrong id', async () => {
+  const key = await player('みる');
+  await call('POST', '/v1/scores', { key, run: logged('w1', 'easy', 1.1) });
+  const r = await call('GET', '/v1/replay?id=w1');
+  assert.equal(r.status, 200);
+  assert.deepEqual([r.body.name, r.body.course, r.body.time, r.body.keys.keys.length, r.body.own], ['みる', 'easy', 16.5, 30, 0]);
+  assert.equal((await call('GET', '/v1/board?course=easy&span=today')).body.rows[0].id, 'w1', 'the board row carries the id for its link');
+  assert.equal((await call('GET', '/v1/replay?id=nope')).status, 404);
+  assert.equal((await call('GET', '/v1/replay?id=' + encodeURIComponent('a b'))).status, 400);
+  // A run synced but never ranked (no name) is not there.
+  const anon = await player();
+  await call('POST', '/v1/sync', { key: anon, runs: [human('s1', 'easy', 1)] });
+  assert.equal((await call('GET', '/v1/replay?id=s1')).status, 404);
+});

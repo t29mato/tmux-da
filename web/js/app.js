@@ -4665,7 +4665,8 @@
   function watchHTML(r) {
     var run = r.runId ? REC.runById(r.runId) : null;
     if (!run || !run.klog) return '';
-    return '<p class="em-watch"><button type="button" class="btn" data-replay="' + esc(run.id) + '">' + tx('この回を見る') + '</button></p>';
+    return '<p class="em-watch"><button type="button" class="btn" data-replay="' + esc(run.id) + '">' + tx('この回を見る') + '</button></p>' +
+      (watchable(r) ? '<p class="em-board dim">' + tx('この回は誰でも見られる（ランキングに載った回）:') + '</p>' + watchLinkHTML(run.id) : '');
   }
 
   // A run on the player's own file, with a name: offer to publish the file
@@ -4782,7 +4783,23 @@
     // The title in English carries its kanji: Kuro-obi 黒帯.
     var title = EN && LV.rankInfo(r.rank) ? LV.rankInfo(r.rank).romaji + ' ' + r.rank : r.rank;
     return tx('tmux 道場 {0} {1} {2}秒（お手本 {3}秒）{4}', EN ? dayLabel(day) : +d[1] + '/' + +d[2], c.title, r.time.toFixed(1), r.par, title) + '\n' +
-      rows.join('\n') + '\n' + SITE + (EN ? '?lang=en' : '');
+      rows.join('\n') + '\n' + (watchable(r) ? watchURL(r.runId) : SITE + (EN ? '?lang=en' : ''));
+  }
+
+  // A run on the boards with its keys can be watched by anyone from a link.
+  function watchable(r) {
+    if (!r || !r.board || r.board.state !== 'ok' || !r.runId) return false;
+    var run = REC.runById(r.runId);
+    return !!(run && run.klog);
+  }
+
+  function watchURL(id) { return SITE + '?watch=' + encodeURIComponent(id) + (EN ? '&lang=en' : ''); }
+
+  // The link under a watchable run, with a button that copies it.
+  function watchLinkHTML(id) {
+    var url = watchURL(id);
+    return '<p class="watch-link"><a href="' + esc(url) + '" target="_blank" rel="noopener" data-watch-url>' + esc(url) + '</a>' +
+      '<button type="button" class="btn ghost" data-copy-watch="' + esc(url) + '">' + tx('リンクを写す') + '</button><small class="watch-msg" aria-live="polite"></small></p>';
   }
 
   function shareHTML(r) {
@@ -4901,7 +4918,7 @@
           // A run on the player's own .tmux.conf (bind -n moves take one key)
           // is said so; a published file is a link to it.
           var own = r.own ? ' <small class="r-own">' + (r.conf ? '<a href="#" data-conf-of="' + esc(r.name) + '">' + tx('自分の設定') + '</a>' : tx('自分の設定')) + '</small>' : '';
-          var watch = r.log ? ' <a href="#" class="r-watch" data-watch="' + esc(r.name) + '">' + tx('見る') + '</a>' : '';
+          var watch = r.log ? ' <a href="#" class="r-watch" data-watch="' + esc(r.name) + '" data-watch-id="' + esc(r.id || '') + '">' + tx('見る') + '</a>' : '';
           return '<tr class="' + (me && r.name === me ? 'is-me' : '') + '"><td class="c-n">' + r.rank + '</td><td>' + esc(r.name) + own + watch + '</td><td class="r-time">' + tx('{0}秒', r.time.toFixed(1)) + '</td><td class="r-note c-n">' + esc(r.day.slice(5).replace('-', '/')) + '</td></tr>';
         }).join('') + '</tbody></table>';
     };
@@ -5015,28 +5032,62 @@
   // The player's best of the span with its keys: listed per question, and
   // played again when its bindings are known (the defaults, or a published
   // file).
-  function openWatch(name, course, span) {
-    S.watch = { name: name, course: course, run: null };
+  function openWatch(name, course, span, id) {
+    S.watch = { name: name, course: course, run: null, id: id || null };
     S.recTab = 'watch';
     renderRecords();
     NET.ghost(course, span, { name: name }).then(function (g) {
       if (!S.watch || S.watch.name !== name) return;
-      if (!g || !g.keys) { S.watch.error = tx('この回のキーの記録はない。'); renderRecords(); return; }
-      var c = REC.courseOf(course);
-      var types = questionsFor(c, g.day, false);
-      var run = {
-        course: course, day: g.day, time: g.time, conf: g.conf || g.own ? 1 : 0, prefix: null, keys: g.keys.keys.length, n: types.length,
-        qs: types.map(function (t, i) { return { t: t, s: +((g.splits[i] || 0)).toFixed(2), k: g.keys.keys.filter(function (e) { return inQuestion(g.keys.q, e[0]) === i; }).length }; }),
-        klog: g.keys, shared: !!g.conf
-      };
-      S.watch.run = run;
-      if (S.screen === 'records' && S.recTab === 'watch') renderRecords();
-      // The file the run was played on, when published.
-      if (g.conf) NET.conf(name).then(function (j) { if (S.watch && S.watch.name === name) { S.watch.confText = String(j.text || ''); if (S.screen === 'records' && S.recTab === 'watch') renderRecords(); } }).catch(function () {});
+      takeWatch(g, name, course);
     }).catch(function () {
       if (!S.watch || S.watch.name !== name) return;
       S.watch.error = tx('つながらなかった。通信できるときにもう一度。');
       if (S.screen === 'records' && S.recTab === 'watch') renderRecords();
+    });
+  }
+
+  // The server's run (a ghost or a replay by id) as the watch view and the
+  // replay take it; the published file comes after, when there is one.
+  function takeWatch(g, name, course) {
+    var redraw = function () { if (S.screen === 'records' && S.recTab === 'watch') renderRecords(); };
+    if (!g || !g.keys) { S.watch.error = tx('この回のキーの記録はない。'); redraw(); return null; }
+    var c = REC.courseOf(course);
+    var types = questionsFor(c, g.day, false);
+    var run = {
+      course: course, day: g.day, time: g.time, conf: g.conf || g.own ? 1 : 0, prefix: null, keys: g.keys.keys.length, n: types.length,
+      qs: types.map(function (t, i) { return { t: t, s: +((g.splits[i] || 0)).toFixed(2), k: g.keys.keys.filter(function (e) { return inQuestion(g.keys.q, e[0]) === i; }).length }; }),
+      klog: g.keys, shared: !!g.conf
+    };
+    S.watch.run = run;
+    redraw();
+    if (g.conf) NET.conf(name).then(function (j) {
+      if (!S.watch || S.watch.name !== name) return;
+      S.watch.confText = String(j.text || '');
+      // From a link: the replay starts as soon as the file is here.
+      if (S.watch.link && !S.replay && S.screen !== 'game' && replayable(run, S.watch.confText)) { startReplay(run, name, S.watch.confText, 'title'); return; }
+      redraw();
+    }).catch(function () {});
+    return run;
+  }
+
+  // ?watch=<run id>: someone's link to a ranked run. Fetched, then played
+  // on the house at once when its keys are known, else listed. Only from the
+  // site or a local test server, as the boards are.
+  function openWatchLink(id) {
+    if (!NET || !/^https?:$/.test(location.protocol) && !/^http:\/\/(localhost|127\.0\.0\.1)|-staging\./.test(NET.API)) return;
+    S.watch = { name: '', course: null, run: null, id: id, link: true };
+    NET.replay(id).then(function (g) {
+      if (!S.watch || S.watch.id !== id || !REC.courseOf(g.course)) return;
+      S.watch.name = g.name; S.watch.course = g.course;
+      var run = takeWatch(g, g.name, g.course);
+      if (!run) { S.recTab = 'watch'; openRecords(g.course, 'title'); return; }
+      if (replayable(run, null) && startReplay(run, g.name, undefined, 'title')) return;
+      // The file is needed first (an own-config run): the list, with 再生する once it is here.
+      S.recTab = 'watch';
+      openRecords(g.course, 'title');
+    }).catch(function (e) {
+      S.watch = null;
+      if (S.screen === 'title') banner(e && e.status === 404 ? 'その回は見つからない' : 'つながらなかった', 'go');
     });
   }
 
@@ -5068,6 +5119,7 @@
     if (!run) html += '<p class="rec-empty">' + esc(w.error || tx('読み込み中……')) + '</p>';
     else {
       html += '<p class="rec-empty">' + tx('{0}秒 ・ 押したキー {1}', run.time.toFixed(1), run.keys) + (run.conf ? tx(' ・ 自分の設定') : '') + '</p>' +
+        (w.id ? watchLinkHTML(w.id) : '') +
         '<div class="cta">' + (can ? '<button type="button" class="btn primary" data-replay-watch="1">' + tx('再生する') + '</button>'
           : '<span class="rec-empty">' + tx(run.mine ? 'この回のキー設定と今の設定が違うので、再生はできない（キーの一覧だけ）。' : run.conf && !run.shared ? 'この人の設定は公開されていないので、再生はできない（キーの一覧だけ）。' : '再生はできない（キーの一覧だけ）。') + '</span>') +
         '<button type="button" class="btn ghost" data-rec-tab="board">' + tx('ランキングへ戻る') + '</button></div>' +
@@ -5404,6 +5456,14 @@
     $('#ghostbar').addEventListener('pointerdown', function (e) { if (e.target.closest('button')) e.preventDefault(); });
     // The published .tmux.conf: the sheet, then the send.
     document.addEventListener('click', function (e) {
+      var cw = e.target.closest('[data-copy-watch]');
+      if (cw) {
+        var wm = cw.parentNode.querySelector('.watch-msg');
+        var saidW = function (t) { if (wm) wm.textContent = tx(t); };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(cw.dataset.copyWatch).then(function () { saidW('リンクを写した。'); }, function () { saidW('写せなかった。リンクを選んでコピーして。'); });
+        else saidW('写せなかった。リンクを選んでコピーして。');
+        return;
+      }
       if (e.target.closest('[data-conf-share]')) { e.preventDefault(); openConfDialog(); return; }
       if (e.target.closest('#conf-publish')) { publishConf(); return; }
       if (e.target.closest('#conf-cancel')) { closeConfDialog(); return; }
@@ -5433,7 +5493,7 @@
       var co = e.target.closest('[data-conf-of]');
       if (co) { e.preventDefault(); openConfOf(co.dataset.confOf); return; }
       var wt = e.target.closest('[data-watch]');
-      if (wt) { e.preventDefault(); openWatch(wt.dataset.watch, S.recCourse, S.boardSpan || BOARD_SPAN); return; }
+      if (wt) { e.preventDefault(); openWatch(wt.dataset.watch, S.recCourse, S.boardSpan || BOARD_SPAN, wt.dataset.watchId); return; }
       if (e.target.closest('[data-replay-watch]')) {
         var w = S.watch;
         if (w && w.run) startReplay(w.run, w.name, w.confText, 'records');
@@ -5525,6 +5585,11 @@
     setInterval(function () { if (S.screen === 'game' && !S.confirm && !S.prompt && !S.message) renderStatus(); }, 30000);
 
     showScreen('title');
+    // Someone's link to a run: straight to the replay.
+    try {
+      var watchId = new URLSearchParams(window.location.search).get('watch');
+      if (watchId && /^[\w-]{1,40}$/.test(watchId)) openWatchLink(watchId);
+    } catch (e) { /* no URLSearchParams: no link */ }
 
     // A read-only view for the tests. Playing still goes through the keyboard.
     window.tmuxDa = {
@@ -5571,6 +5636,7 @@
           ghost: b && b.ghost ? { name: b.ghost.name, time: b.ghost.time, today: !!b.ghost.today, kind: b.ghost.kind || null, keys: b.ghost.keys ? b.ghost.keys.keys.length : 0 } : null,
           klog: b && b.klog ? { keys: b.klog.keys.length, q: b.klog.q.slice() } : null,
           replay: S.replay ? { who: S.replay.who, i: S.replay.i, n: S.replay.keys.length, t: Math.round(S.replay.t), speed: S.replay.speed, playing: S.replay.playing, lost: S.replay.lost, done: S.replay.done } : null,
+          watch: S.watch ? { name: S.watch.name, id: S.watch.id || null, run: !!S.watch.run, error: S.watch.error || null } : null,
           detail: S.detail, conf: S.conf ? { prefix: S.conf.prefix.label, binds: S.conf.binds.length, navigator: S.conf.navigator, modeKeys: S.conf.modeKeys, statusTop: S.conf.statusTop } : null,
           cols: S.cols, rows: S.rows
         };
