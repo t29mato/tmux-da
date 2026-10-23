@@ -2077,6 +2077,65 @@ async function loop6(browser) {
   ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await ctx.close();
 }
+// The first minute (round 7): someone who has never used tmux, and someone
+// who knows it and wants 上級 at once.
+async function loop7(browser) {
+  const L = '[loop7]';
+  const status = () => page.$eval('#status', (e) => e.textContent);
+  // Phone: 始め is not drawn over the first question's card.
+  let ctx = await browser.newContext({ viewport: PHONE });
+  let page = await ctx.newPage();
+  let errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#btn-enter');
+  await waitPlay(page);
+  const over = await page.evaluate(() => {
+    const b = document.querySelector('#banner').getBoundingClientRect();
+    const c = document.querySelector('#term .motd').getBoundingClientRect();
+    const ox = Math.min(b.right, c.right) - Math.max(b.left, c.left), oy = Math.min(b.bottom, c.bottom) - Math.max(b.top, c.top);
+    return { shown: document.querySelector('#banner').classList.contains('show'), overlap: ox > 0 && oy > 0 };
+  });
+  ok(over.shown && !over.overlap, L + ' on a phone the guide card is placed clear of 始め (' + JSON.stringify(over) + ')');
+  await ctx.close();
+  // Desktop: the slips of the first minute are each said in the status bar.
+  ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  page = await ctx.newPage();
+  errors = watch(page);
+  await page.goto(PAGE);
+  const hks = await page.$$eval('#course-list .wing-name kbd.hk', (l) => l.map((e) => e.textContent).join(''));
+  ok(hks === '123', L + ' the course cards show their keys 1 2 3 (' + hks + ')');
+  await page.keyboard.press('3');
+  await waitPlay(page);
+  ok((await st(page)).run.course === 'hard', L + ' 3 on the title starts 上級 at once');
+  await page.click('.quit.to-title');
+  await page.click('#btn-enter');
+  await waitPlay(page);
+  await page.waitForTimeout(800);
+  await page.keyboard.press('Control+b'); await page.keyboard.press('Control+b');
+  ok(/Ctrl\+b を 2 回押した。2 回目はシェルに入る/.test(await status()), L + ' the prefix pressed twice is said (' + (await status()).trim() + ')');
+  await page.keyboard.press('Meta+b');
+  ok(/Cmd ではなく Ctrl を押しながら b/.test(await status()), L + ' Cmd+b is said to be Ctrl+b (' + (await status()).trim() + ')');
+  // A wrong key's chip is gone when the next question comes.
+  await page.keyboard.press('Control+b'); await page.keyboard.press('w');
+  ok((await page.$$('#chips .chip.miss')).length === 1, L + ' the wrong key w puts up a miss chip');
+  let i0 = (await st(page)).run.i;
+  for (let k = 0; k < 12 && (await st(page)).run.i === i0; k++) await followGuide(page, 'Control+b');
+  ok((await st(page)).run.i === i0 + 1 && (await page.$$('#chips .chip.miss')).length === 0, L + ' the miss chip is taken down with the next question');
+  // An arrow pressed without the prefix is explained like a letter is.
+  let said = null;
+  for (let g = 0; g < 60 && said === null; g++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    const mv = s.run.next;
+    if (mv && mv.pfx && ARROW[mv.keys[0]]) {
+      await page.keyboard.press(ARROW[mv.keys[0]]);
+      said = await status();
+    } else await followGuide(page, 'Control+b');
+  }
+  ok(said !== null && /[←→↑↓] がシェルに入った。先に Ctrl\+b（prefix）を押す/.test(said), L + ' an arrow without the prefix is said to have gone to the shell (' + (said || 'no arrow question').trim() + ')');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
 const LV_PEEK_MS = 4300;
 
 // ONLY=records,sound runs just those parts (the names below).
@@ -2112,6 +2171,7 @@ const parts = [
   ['loop4', loop4],
   ['loop5', loop5],
   ['loop6', loop6],
+  ['loop7', loop7],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
