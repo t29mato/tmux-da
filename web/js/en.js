@@ -334,7 +334,7 @@ window.ADV.EN = {
   "名前を付けると、遊ぶたびに自分の一番が載る。名前は「引き継ぎ」で付けられる。": "Add a name and your best is listed each time you play. Add it under Sync.",
   "名前を変える": "Rename",
   "名前（12 文字まで）": "Name (up to 12 characters)",
-  "問題は毎回ちがう順で出る。違う操作は +2 秒。指示には答えの手順がいつも出ている。目安を過ぎても問題は飛ばない。タブを離れると時計が止まる（長く止めた回はランキングには載らない）。": "The questions come in a new order every day, the same for everyone. A wrong key costs +2s. The steps to the answer are always on screen. No question is ever skipped, even past its target time. The clock stops while you are away from the tab (a run paused for long is kept off the ranking).",
+  "問題の順番は日ごとに変わり、その日はみんな同じ。違う操作は +2 秒。指示には答えの手順がいつも出ている。目安を過ぎても問題は飛ばない。タブを離れると時計が止まる（長く止めた回はランキングには載らない）。": "The questions come in a new order every day, the same for everyone. A wrong key costs +2s. The steps to the answer are always on screen. No question is ever skipped, even past its target time. The clock stops while you are away from the tab (a run paused for long is kept off the ranking).",
   "境目を{0}へ{1}マスずらす": "move the border {0} by {1}",
   "変える": "Change",
   "外からは tmux new -s 名前。中からなら prefix → : で new -s 名前。": "Outside: tmux new -s NAME. Inside: prefix → : then new -s NAME.",
