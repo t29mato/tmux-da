@@ -2561,6 +2561,26 @@ async function loop11(browser) {
   }
 }
 
+// The version line under the title: a local copy says dev (publish.sh
+// stamps the deploy number and the commit into the site's copy).
+async function version(browser) {
+  const L = '[version]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  ok(/^v\d+\.\d+\.\d+ · dev$/.test(await page.$eval('#ver', (e) => e.textContent.trim())), L + ' the title shows the version (dev locally)');
+  // A published copy, as publish.sh stamps it.
+  await page.route('**/js/version.js', (r) => r.fulfill({ contentType: 'application/javascript', body: "window.ADV = window.ADV || {}; window.ADV.VERSION = { v: '1.0.0', deploy: 31, commit: 'abc1234', at: '2026-10-23' };" }));
+  await page.goto(PAGE);
+  ok((await page.$eval('#ver', (e) => e.textContent.trim())) === 'v1.0.0 · デプロイ 31 · abc1234 (2026-10-23)', L + ' a published copy shows the deploy number and the commit');
+  ok(/\/commit\/abc1234$/.test(await page.$eval('#ver a', (e) => e.href)), L + ' the commit links to GitHub');
+  await page.goto(PAGE.includes('?') ? PAGE + '&lang=en' : PAGE + '?lang=en');
+  ok((await page.$eval('#ver', (e) => e.textContent.trim())) === 'v1.0.0 · deploy 31 · abc1234 (2026-10-23)', L + ' in English too');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -2600,6 +2620,7 @@ const parts = [
   ['loop10', loop10],
   ['loop11', loop11],
   ['loop14', loop14],
+  ['version', version],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
