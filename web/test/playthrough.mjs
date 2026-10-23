@@ -305,7 +305,7 @@ async function course(browser, prefixOpt, id, viewport, scheme, tag, platform = 
   const s = await st(page);
   ok(s.result && s.result.time > 0 && s.result.record, label + ' the result has a time (' + (s.result ? s.result.time.toFixed(1) : '-') + 's) and is a new record');
   ok(/\d+ 問、解き終わった/.test(await page.$eval('#result-body .em-title', (e) => e.textContent)), label + ' the result says the course is done');
-  ok(/お手本/.test(await page.$eval('#result-body .em-verdict', (e) => e.textContent)), label + ' the result compares with the お手本 time');
+  ok(/お手本 \d+ 秒(より \d+\.\d 秒 速い|まで あと \d+\.\d 秒)/.test(await page.$eval('#result-body .em-verdict', (e) => e.textContent)), label + ' the result says how far from the お手本 time (' + (await page.$eval('#result-body .em-verdict', (e) => e.textContent)) + ')');
   if (id === 'easy') ok(s.result.misses >= 1, label + ' the miss is in the result');
   await shot(page, `result-${tag}`);
   await page.reload();
@@ -765,7 +765,7 @@ async function noSkip(browser) {
   await page.clock.runFor(limit * 1000 - 1500);
   let s = await st(page);
   ok(s.run.i === 0 && s.run.stage === 1, L + ' past ' + limit + ' 秒 of play the question is still there and the 行灯 is lit');
-  ok(/目安を過ぎた/.test(await page.$eval('#sashizu .andon-over', (e) => e.textContent)), L + ' the panel says the 目安 is past');
+  ok(/目安超え/.test(await page.$eval('#sashizu .andon-over', (e) => e.textContent)), L + ' the panel says the 目安 is past');
   ok(await page.$eval('#sashizu kbd.next', (e) => getComputedStyle(e).animationName) === 'none', L + ' the lit keys stay still');
   await shot(page, 'andon');
   await page.clock.runFor(60000);
@@ -1073,7 +1073,7 @@ async function learning(browser) {
   await page.click('.quit.to-title');
   await page.keyboard.press('r');
   ok((await st(page)).screen === 'records', L + ' R opens the 絵巻');
-  ok(/覚えた問題/.test(await page.$eval('#records-body', (e) => e.textContent)), L + ' the 絵巻 lists what is learnt');
+  ok(/覚えた問題[^]*5 回続けて速く解けた問題は「覚えた」になり、手順が隠れる/.test(await page.$eval('#records-body', (e) => e.textContent)), L + ' the 絵巻 lists what is learnt and says how a question gets learnt');
   await page.keyboard.press('Escape');
   ok((await st(page)).screen === 'title', L + ' Esc goes back');
   ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
@@ -2316,7 +2316,7 @@ async function loop10(browser) {
   await page.evaluate((d) => localStorage.setItem('tmux-da', JSON.stringify(d)), seed([110, 92, 70]));
   await page.reload();
   ok(/^師範代まで あと \d+\.\d 秒$/.test(await text('[data-course="easy"] .wing-rank')), L + ' at 三段 the next is 師範代 (' + (await text('[data-course="easy"] .wing-rank')) + ')');
-  ok(/次はここ（入門 で 三段）/.test(await text('[data-course="normal"] .wing-next')), L + ' the 中級 card says it is the step up');
+  ok(/次はここ（入門で 三段）/.test(await text('[data-course="normal"] .wing-next')), L + ' the 中級 card says it is the step up');
   ok(!(await page.$('[data-course="hard"] .wing-next')), L + ' 上級 is not');
   // Play today: the result says what the next title needs; the title then shows the streak.
   await page.keyboard.press('Enter');

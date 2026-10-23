@@ -13,7 +13,7 @@ test('t: the Japanese as written, or its English, with {0} filled in', () => {
   assert.equal(en().t('通算 {0} 回', 1), '1 run in all');
   assert.equal(en().t('通算 {0} 回', 12), '12 runs in all');
   assert.equal(en().t('使う {0} 行', 1), '1 line used');
-  assert.equal(en().t('手順なし・押し違いなしで続けて解けた最長 {0} 問 ・ {1} 回', 7, 1), 'Longest run from memory with no wrong key: 7 · 1 drill');
+  assert.equal(en().t('手順なし・ミスなしで続けて解けた最長 {0} 問 ・ {1} 回', 7, 1), 'Longest run from memory with no wrong key: 7 · 1 drill');
 });
 
 test('t: {0:one|many} is left alone in Japanese and when there is no argument', () => {
