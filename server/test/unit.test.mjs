@@ -228,6 +228,11 @@ test('checkRun: 今日の達人 takes the day\'s question only, and says whether
   const ok = { id: 'r_d', course: 'daily', ver: 2, time: 4.2, qs: [{ t: dailyPick(day), s: 4.2, m: 0 }] };
   assert.deepEqual([checkRun(ok).n, checkRun(ok).peek], [1, 0]);
   assert.equal(checkRun({ ...ok, qs: [{ ...ok.qs[0], g: 1 }] }).peek, 1, 'the 手順 came out: marked');
+  // On a house: how many questions the 手順 came out on.
+  const order = dailyOrder('hard', day);
+  const hard = { id: 'r_h', course: 'hard', ver: 2, time: 48, qs: order.map((t, i) => ({ t, s: 3, m: 0, g: i < 3 ? 1 : undefined })) };
+  assert.equal(checkRun(hard).peek, 3, 'three questions peeked');
+  assert.equal(checkRun({ ...hard, qs: hard.qs.map((q) => ({ t: q.t, s: q.s, m: 0 })), guides: 2 }).peek, 1, 'an older client: guides only, marked once');
   // A question no day near now asks.
   const other = QUESTIONS.pro.find((t) => ![-1, 0, 1].some((k) => dailyPick(jstDay(new Date(Date.now() + k * 86400000))) === t));
   assert.throws(() => checkRun({ ...ok, qs: [{ t: other, s: 4.2, m: 0 }] }), /not today's order/);

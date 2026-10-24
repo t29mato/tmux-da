@@ -149,8 +149,10 @@ export function checkRun(run, now = new Date()) {
   const sum = splits.reduce((a, b) => a + b, 0);
   if (!(run.qs.reduce((a, q) => a + q.s, 0) >= MIN_AVG * n)) throw new Fail(400, 'too fast');
   if (typeof run.time !== 'number' || Math.abs(sum - run.time) > 0.05 * n + 0.2) throw new Fail(400, 'time does not add up');
-  // Whether the 手順 came out (今日の達人 is played without it): said on the board.
-  const peek = run.qs.some((q) => q.g) || (Number.isInteger(run.guides) && run.guides > 0) ? 1 : 0;
+  // How many questions the 手順 came out on (今日の達人, and 上級 and 達人
+  // from the second run, are played without it): said on the board. A
+  // client from before that counted only `guides` gives 1.
+  const peek = run.qs.filter((q) => q.g).length || (Number.isInteger(run.guides) && run.guides > 0 ? 1 : 0);
   return { n, splits, time: +run.time.toFixed(2), own: run.conf ? 1 : 0, peek };
 }
 

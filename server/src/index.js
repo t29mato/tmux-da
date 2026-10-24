@@ -178,7 +178,7 @@ const ownDone = new WeakSet();
 async function ownColumn(env) {
   if (ownDone.has(env.DB)) return;
   try { await env.DB.prepare('ALTER TABLE scores ADD COLUMN own INTEGER NOT NULL DEFAULT 0').run(); } catch (e) { /* already there */ }
-  // scores.peek (1: the 手順 came out) came with 今日の達人.
+  // scores.peek (on how many questions the 手順 came out; 1 on older rows) came with 今日の達人.
   try { await env.DB.prepare('ALTER TABLE scores ADD COLUMN peek INTEGER NOT NULL DEFAULT 0').run(); } catch (e) { /* already there */ }
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS keylogs (key_hash TEXT NOT NULL, run_id TEXT NOT NULL, log TEXT NOT NULL, PRIMARY KEY (key_hash, run_id))').run();
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS confs (key_hash TEXT PRIMARY KEY, text TEXT NOT NULL, at TEXT NOT NULL)').run();
@@ -241,8 +241,9 @@ async function bestRows(env, q, max) {
 async function board(env, q) {
   const rows = await bestRows(env, q, 50);
   // conf: the player's own .tmux.conf is published; log: this run can be
-  // watched; keys: how many it pressed; peek: the 手順 came out.
-  return json({ rows: rows.map((r, i) => ({ rank: i + 1, id: r.run_id, name: r.name, time: r.time, day: r.day, own: r.own ? 1 : 0, conf: r.own && r.conf ? 1 : 0, log: r.nkeys != null ? 1 : 0, keys: r.nkeys != null ? r.nkeys : null, peek: r.peek ? 1 : 0 })) }, 200, { 'Cache-Control': 'max-age=15' });
+  // watched; keys: how many it pressed; peek: on how many questions the 手順
+  // came out (1 on rows from before the count).
+  return json({ rows: rows.map((r, i) => ({ rank: i + 1, id: r.run_id, name: r.name, time: r.time, day: r.day, own: r.own ? 1 : 0, conf: r.own && r.conf ? 1 : 0, log: r.nkeys != null ? 1 : 0, keys: r.nkeys != null ? r.nkeys : null, peek: r.peek || 0 })) }, 200, { 'Cache-Control': 'max-age=15' });
 }
 
 // The run to race or to watch: the best of the span, the slowest one faster

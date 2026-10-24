@@ -177,3 +177,20 @@ test('the 稽古 is a drill: practice, no fixed questions, every frequent key we
   for (const t of ['resize', 'rename', 'swap', 'kill_window', 'break_pane']) assert.equal(LV.DRILL_FREQ[t], 2, t);
   for (const t of ['trident', 'two_akima', 'yank_paste', 'swap_zoom']) assert.equal(LV.DRILL_FREQ[t], 1, t);
 });
+
+test('はじめての回 of 入門: the same questions, a split first, nothing closed in the first three', () => {
+  const easy = LV.COURSES[0], first = plain(easy.firstQs);
+  assert.deepEqual([...first].sort(), plain(easy.qs).sort(), 'the same questions as the house');
+  assert.match(first[0], /^split_/);
+  assert.ok(!first.slice(0, 3).includes('close'));
+  first.forEach((t, i) => {
+    if (i) assert.notEqual(t, first[i - 1], 'no type twice in a row');
+    if (i && first[i - 1] === 'new_window') assert.notEqual(t, 'zoom');
+    if (t === 'unzoom') assert.equal(first[i - 1], 'zoom', 'unzoom right after a zoom');
+  });
+  assert.ok(!LV.COURSES.slice(1).some((c) => c.firstQs), 'only 入門 has one');
+});
+
+test('上級 and 達人 hide their 手順 from the second run; 入門 and 中級 never', () => {
+  assert.deepEqual(plain(LV.COURSES.filter((c) => c.blindLater).map((c) => c.id)), ['hard', 'pro']);
+});
