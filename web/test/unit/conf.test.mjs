@@ -326,3 +326,30 @@ test('a pasted file: shortened names in bind lines, ambiguity reported, renumber
   assert.equal(old.renumber, false);
   assert.equal(old.unsupported.length, 3);
 });
+
+test('fidelity 3: getopt values, shortest names, timed options, bindings with targets', () => {
+  // -t2 and -dt 2 as tmux's getopt reads them.
+  assert.deepEqual(plain(C.flags(['kill-pane', '-t2'])), { f: { t: '2' }, rest: [] });
+  assert.deepEqual(plain(C.words('kill-session -t a; display hi')), [['kill-session', '-t', 'a'], ['display', 'hi']], 'a; b: two commands');
+  assert.deepEqual(plain(C.words("display 'a;b'")), [['display', 'a;b']]);
+  assert.deepEqual(plain(C.flags(['new-window', '-dn', 'logs'])), { f: { d: true, n: 'logs' }, rest: [] });
+  assert.deepEqual(plain(C.flags(['rename-window', '-t', ':1', 'dev'])), { f: { t: ':1' }, rest: ['dev'] });
+  // The fewest letters tmux still takes: the alias, else the shortest unique start.
+  assert.equal(C.shortest('kill-pane'), 'killp');
+  assert.equal(C.shortest('kill-session'), 'kill-ses');
+  assert.equal(C.shortest('swap-window'), 'swapw');
+  assert.equal(C.shortest('new-window'), 'neww');
+  assert.equal(C.resolve(C.shortest('kill-session')).name, 'kill-session');
+  // Times the game keeps are used; escape-time and mouse say why they do not matter.
+  const c = C.parse(['set -g display-panes-time 3000', 'set -g repeat-time 300', 'set -sg escape-time 10', 'set -g mouse on'].join('\n'));
+  assert.equal(c.displayPanesTime, 3000);
+  assert.equal(c.repeatTime, 300);
+  assert.deepEqual(plain(c.used.map((s) => s.no)), [1, 2]);
+  assert.deepEqual(plain(c.skipped.map((s) => s.no)), [3, 4]);
+  assert.ok(/Esc/.test(c.skipped[0].why) && /マウス/.test(c.skipped[1].why));
+  assert.deepEqual(plain(c.unsupported.map((s) => s.no)), []);
+  // A binding with a target runs the command itself (it used to be 未対応).
+  const b = C.parse(['bind m select-pane -t 0', 'bind K kill-pane -t 1', 'bind W select-window -t logs', 'bind e select-layout -E'].join('\n'));
+  assert.equal(b.unsupported.length, 0, JSON.stringify(plain(b.unsupported)));
+  assert.deepEqual(plain(b.binds.map((x) => x.act.run || x.act.key)), ['cmd', 'cmd', 'cmd', 'E']);
+});

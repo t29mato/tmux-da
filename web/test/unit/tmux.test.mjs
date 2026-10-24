@@ -344,3 +344,18 @@ test('copy mode: vi word moves and f/t as tmux 3.8 puts the cursor (default word
   assert.equal(T.copyJump(line, 9, 'F', 'f'), 0);
   assert.equal(T.copyJump(line, 0, 'T', 'o'), 0, 'nothing that way: the cursor stays');
 });
+
+test('select-layout -E: the pane and those beside it along one split share it evenly', () => {
+  const s = T.createSession({ name: 't', baseIndex: 0, paneBaseIndex: 0 });
+  const win = T.createWindow(s, 'zsh');
+  T.selectWindow(s, win.id);
+  const a = win.active;
+  const b = T.splitPane(win, a, 'lr').id;
+  const c = T.splitPane(win, b, 'lr').id;
+  T.splitPane(win, a, 'tb');
+  const widths = () => [a, b, c].map((id) => T.rectOf(win, id, 91, ROWS).w);
+  assert.notDeepEqual(plain(widths()), [30, 30, 29]);
+  assert.ok(T.spreadOut(win, b));
+  assert.deepEqual(plain(widths()), [30, 30, 29], '89 cells between two borders, the spare to the first (as even-horizontal)');
+  assert.equal(T.panesOf(win).length, 4, 'the top-bottom split inside the first column is kept');
+});
