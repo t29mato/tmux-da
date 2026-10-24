@@ -3198,6 +3198,35 @@ async function ontrack(browser) {
   await ctx.close();
 }
 
+// The H/J/K/L button: the four resize binds go in, and the resize question
+// of 中級 is guided (and solved) with them, never with the arrows.
+async function resizeHjkl(browser) {
+  const L = '[resize hjkl]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#conf-box summary');
+  await page.click('#conf-resize');
+  ok(/bind -r H resize-pane -L 5/.test(await page.inputValue('#conf-text')), L + ' the button writes the binds into the box');
+  await page.click('#conf-resize');
+  ok(((await page.inputValue('#conf-text')).match(/resize-pane -L 5/g) || []).length === 1, L + ' pressed twice, the binds go in once');
+  await page.click('#course-list [data-course="normal"]');
+  await waitPlay(page);
+  const keys = new Set();
+  let seen = false;
+  for (let guard = 0; guard < 300; guard++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    if (s.run.type === 'resize') { seen = true; if (s.run.next && s.run.next.keys[0]) keys.add(s.run.next.keys[0]); }
+    await followGuide(page, 'Control+b');
+  }
+  await waitResult(page, L);
+  ok(seen && [...keys].some((k) => /^[HJKL]$/.test(k)) && ![...keys].some((k) => /[←→↑↓]/.test(k)), L + ' the resize question is guided with H/J/K/L, not arrows (' + [...keys].join(' ') + ')');
+  ok(!errors.length, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -3240,6 +3269,7 @@ const parts = [
   ['loop14', loop14],
   ['version', version],
   ['ontrack', ontrack],
+  ['resizehjkl', resizeHjkl],
   ['belts', belts],
   ['ghost', ghost],
   ['tatsujin', tatsujin],
