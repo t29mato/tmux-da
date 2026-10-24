@@ -113,10 +113,12 @@ test('everything else is listed with a reason, never dropped silently: 未対応
     'run "~/bin/something"',
     'bind Q display-popup -E'
   ].join('\n'));
-  assert.equal(c.used.length, 0);
+  // renumber-windows is followed (expert round 2).
+  assert.deepEqual(plain(c.used.map((s) => s.no)), [5]);
+  assert.equal(c.renumber, true);
   // 関係ない: the look and the plugin's own option. 未対応: what tmux does and the game cannot.
   assert.deepEqual(plain(c.skipped.map((s) => s.no)), [1, 2, 4]);
-  assert.deepEqual(plain(c.unsupported.map((s) => s.no)), [3, 5, 6, 7, 8, 9]);
+  assert.deepEqual(plain(c.unsupported.map((s) => s.no)), [3, 6, 7, 8, 9]);
   assert.ok(c.skipped.concat(c.unsupported).every((s) => s.why && s.no >= 1 && s.line));
   assert.equal(c.custom, true, 'Q is taken (dead), so the file counts');
   assert.equal(C.parse('set -g mouse on').custom, false, 'nothing taken: still the defaults');
@@ -151,7 +153,8 @@ test('copy-mode tables: the player\'s keys for begin, copy, cancel and the moves
     'bind -T copy-mode-vi Y send -X copy-pipe "pbcopy"',
     'bind -T copy-mode-vi Escape send-keys -X cancel',
     'bind -T copy-mode-vi H send -X start-of-line',
-    'bind -T copy-mode-vi K send -X top-line',
+    'bind -T copy-mode-vi K send -X scroll-up',
+    'bind -T copy-mode-vi T send -X top-line',
     'bind -T copy-mode M-w send -X copy-selection-and-cancel',
     'bind -t vi-copy u halfpage-up'
   ].join('\n'));
@@ -163,13 +166,14 @@ test('copy-mode tables: the player\'s keys for begin, copy, cancel and the moves
   assert.equal(C.copyLookup(c, ev('Escape')).act.copy, 'cancel');
   assert.equal(C.copyLookup(c, ev('H', { shift: true })).act.copy, 'start-of-line');
   assert.equal(C.copyLookup(c, ev('u')).act.copy, 'halfpage-up', 'the old -t vi-copy form is read');
-  assert.ok(C.copyLookup(c, ev('K', { shift: true })).act.none, 'top-line: the key is taken, dead');
+  assert.ok(C.copyLookup(c, ev('K', { shift: true })).act.none, 'scroll-up: the key is taken, dead');
+  assert.equal(C.copyLookup(c, ev('T', { shift: true })).act.copy, 'top-line', 'the vi screen moves are the game\'s since expert round 2');
   assert.equal(C.copyLookup(c, ev('w', { alt: true, code: 'KeyW' })), null, 'the emacs table is not in use with mode-keys vi');
   assert.equal(C.copyKey(c, ['begin-selection']), 'v');
   assert.equal(C.copyKey(c, ['copy-pipe-and-cancel', 'copy-selection-and-cancel']), 'y');
   assert.equal(C.copyKey(c, ['history-top']), null);
   assert.equal(c.unsupported.length, 1);
-  assert.ok(/top-line/.test(c.unsupported[0].why));
+  assert.ok(/scroll-up/.test(c.unsupported[0].why));
   // No mode-keys: both tables count.
   const both = C.parse('bind -T copy-mode M-w send -X copy-selection-and-cancel\nbind -T copy-mode-vi v send -X begin-selection');
   assert.equal(both.modeKeys, null);
@@ -195,7 +199,7 @@ test('status-position, and the aliases of the commands the game has', () => {
     'bind j lsk',
     'bind k clock-mode',
     'bind l display "hello"',
-    'bind m choose-window'
+    'bind m choose-tree -w'
   ].join('\n'));
   assert.equal(c.statusTop, true);
   assert.equal(c.unsupported.length, 0, JSON.stringify(c.unsupported));
@@ -262,7 +266,7 @@ test('the 達人 commands bound to keys: layouts, rotate -D, synchronize-panes, 
   const at = (k, m) => plain(C.lookup(c, 'prefix', ev(k, m)).act);
   assert.deepEqual([at('=').key, at('=').alt], ['5', true], 'tiled is prefix M-5');
   assert.equal(at('9', { alt: true, code: 'Digit9' }).key, '7', 'main-vertical-mirrored is prefix M-7');
-  assert.deepEqual(at('S', { shift: true }).argv, ['setw', 'synchronize-panes'], 'the first command counts');
+  assert.deepEqual(at('S', { shift: true }).argv, ['set-window-option', 'synchronize-panes'], 'the first command counts, its name written out');
   const j = at('J', { shift: true });
   assert.deepEqual([j.run, j.label, j.tpl], ['prompt', 'join pane from:', "join-pane -s '%%'"]);
   assert.equal(at('m').run, 'prompt');
@@ -272,4 +276,53 @@ test('the 達人 commands bound to keys: layouts, rotate -D, synchronize-panes, 
   assert.equal(at('@', { shift: true }).run, 'cmd');
   assert.equal(at('K', { shift: true }).run, 'cmd');
   assert.deepEqual(plain(C.flags(['join-pane', '-hd', '-s', '2.1']).f), { h: true, d: true, s: '2.1' });
+});
+
+// --- expert round 2 ---
+test('command names: any start only one name has, whole aliases, tmux 3.8 ambiguity', () => {
+  const r = (w, exact) => plain(C.resolve(w, exact));
+  assert.deepEqual(r('kill-ses'), { name: 'kill-session' });
+  assert.deepEqual(r('swapw'), { name: 'swap-window' });
+  assert.deepEqual(r('selectl'), { name: 'select-layout' });
+  assert.deepEqual(r('select-l'), { name: 'select-layout' });
+  assert.deepEqual(r('show'), { name: 'show-options' }, 'an alias wins over the names it starts');
+  assert.deepEqual(r('send'), { name: 'send-keys' });
+  assert.deepEqual(r('new'), { name: 'new-session' });
+  assert.deepEqual(r('break'), { name: 'break-pane' });
+  assert.deepEqual(r('sp'), { name: 'split-window' });
+  assert.deepEqual(r('display-mes'), { name: 'display-message' });
+  assert.equal(r('display-m').error, 'ambiguous command: display-m, could be: display-menu, display-message');
+  // As tmux 3.8 words it (tmux -L x source-file of each line).
+  assert.equal(r('kill').error, 'ambiguous command: kill, could be: kill-pane, kill-server, kill-session, kill-window');
+  assert.equal(r('kill-s').error, 'ambiguous command: kill-s, could be: kill-server, kill-session');
+  assert.equal(r('sel').error, 'ambiguous command: sel, could be: select-layout, select-pane, select-window');
+  assert.equal(r('disp').error, 'ambiguous command: disp, could be: display-menu, display-message, display-popup, display-panes');
+  assert.equal(r('res').error, 'ambiguous command: res, could be: resize-pane, resize-window, respawn-pane, respawn-window');
+  assert.equal(r('switch').error, 'ambiguous command: switch, could be: switch-client, switch-mode');
+  assert.equal(r('foo').error, 'unknown command: foo');
+  assert.equal(r('choose-window').error, 'unknown command: choose-window', 'gone from tmux since 2.7');
+  assert.equal(r('lsp').name, 'list-panes', 'an alias of a command the game does not have');
+  // An alias is never shortened: 'swap' is a start of two names.
+  assert.equal(r('swap').error, 'ambiguous command: swap, could be: swap-pane, swap-window');
+  // A replay of an older run: whole names only.
+  assert.equal(r('kill-ses', true).error, 'unknown command: kill-ses');
+  assert.deepEqual(r('killp', true), { name: 'kill-pane' });
+});
+
+test('a pasted file: shortened names in bind lines, ambiguity reported, renumber-windows and break-pane -d taken', () => {
+  const c = C.parse(['bind K kill-ses', 'bind W swapw -t 1', 'bind Q kill', 'bind b break-pane -d', 'set -g renumber-windows on', 'set-o -g mode-keys vi', 'bind ~ show-messages'].join('\n'));
+  const at = (k, m) => plain(C.lookup(c, 'prefix', ev(k, m)).act);
+  assert.deepEqual(at('K', { shift: true }).argv, ['kill-session']);
+  assert.deepEqual(at('W', { shift: true }).argv, ['swap-window', '-t', '1']);
+  assert.ok(at('Q', { shift: true }).none, 'an ambiguous name binds nothing');
+  assert.equal(c.unsupported.length, 1);
+  assert.equal(c.unsupported[0].why, 'ambiguous command: kill, could be: kill-pane, kill-server, kill-session, kill-window');
+  assert.deepEqual(at('b').argv, ['break-pane', '-d']);
+  assert.equal(c.renumber, true);
+  assert.equal(c.modeKeys, 'vi', 'set-o is set-option');
+  assert.deepEqual(at('~').argv, ['show-messages']);
+  // Read as before for a replay of an older run.
+  const old = C.parse(['bind K kill-ses', 'bind b break-pane -d', 'set -g renumber-windows on'].join('\n'), { legacy: true });
+  assert.equal(old.renumber, false);
+  assert.equal(old.unsupported.length, 3);
 });

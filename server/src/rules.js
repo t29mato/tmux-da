@@ -156,7 +156,7 @@ export function checkRun(run, now = new Date()) {
 
 // ---- the key log ------------------------------------------------------------
 // A run may carry what was pressed: `klog: { keys: [[ms, label], ...], q:
-// [ms, ...], cut? }`, ms from the run's start (the clock, without penalties),
+// [ms, ...], cut?, v? }`, ms from the run's start (the clock, without penalties),
 // `q` the start of each question. It must agree with the run and look typed
 // by a hand: a script's keys come at once or on a fixed beat. A run with no
 // log (an older client) is taken as before.
@@ -201,5 +201,8 @@ export function checkLog(run) {
     const lo = Math.min(...gaps), hi = Math.max(...gaps);
     if (hi - lo < 5) logFail('intervals identical');
   }
-  return { keys: g.keys, q: g.q, cut };
+  // `v`: the version of the game's rules the keys were pressed on (a replay
+  // plays them by those rules); none on an older client's log.
+  const v = Number.isInteger(g.v) && g.v >= 1 && g.v <= 99 ? g.v : undefined;
+  return { keys: g.keys, q: g.q, cut, v };
 }

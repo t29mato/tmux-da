@@ -346,6 +346,8 @@ if (SHOTS) await A.page.screenshot({ path: SHOTS + '/online-daily.png', fullPage
 const F = await open(rd.runId);
 await F.page.waitForFunction(() => window.tmuxDa.state().replay, null, { timeout: 15000 });
 ok((await state(F.page)).replay.who === name, 'F: the daily run replays from its link');
+// --- expert round 2 --- the server keeps the log's rules version: today's rules, not the old ones.
+ok((await state(F.page)).replay.legacy === false, 'F: the log from the server carries its version (not replayed by the old rules)');
 await F.page.context().close();
 
 // The unknown 合言葉 above is a 404 on purpose; anything else is a fault.
