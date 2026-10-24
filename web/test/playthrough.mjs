@@ -3926,6 +3926,30 @@ async function ux3(browser) {
   await pc.close();
 }
 
+// Ctrl+b remapped to Backspace before the browser (Karabiner): a Backspace
+// on an empty line where the prefix is due says so, and costs nothing.
+async function remap(browser) {
+  const L = '[remap]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  const s = await st(page, true);
+  ok(s.run.next && s.run.next.pfx, L + ' the first step wants the prefix');
+  await page.keyboard.press('Backspace');
+  const a = await st(page, true);
+  const msg = await page.$eval('#status', (e) => e.textContent);
+  ok(/Ctrl\+b が Backspace に変わっているかも（Karabiner/.test(msg) && a.run.misses === s.run.misses && !a.armed, L + ' Backspace there says Ctrl+b may be remapped, no miss: ' + msg.slice(0, 60));
+  // Not on a line with text (that Backspace is real editing).
+  await page.keyboard.type('ls');
+  await page.keyboard.press('Backspace');
+  ok((await st(page, true)).input === 'l', L + ' a Backspace on a typed line deletes a letter');
+  ok(!errors.length, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -3969,6 +3993,7 @@ const parts = [
   ['version', version],
   ['ontrack', ontrack],
   ['resizehjkl', resizeHjkl],
+  ['remap', remap],
   ['belts', belts],
   ['ghost', ghost],
   ['tatsujin', tatsujin],
