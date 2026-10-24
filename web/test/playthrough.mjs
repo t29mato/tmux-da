@@ -3164,6 +3164,40 @@ async function tatsujin(browser) {
 // The ladder index, as levels.js counts it (0 at 名人), for the checks above.
 const ADV_rankIndex = (t) => ['名人', '達人', '師範', '師範代', '黒帯', '茶帯', '緑帯', '白帯'].indexOf(t);
 
+// A command half typed on the : prompt (swap-windo… of swap-window -t 1)
+// is the right start: the guide says to go on typing, not to clear it.
+async function ontrack(browser) {
+  const L = '[ontrack]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  await page.click('#course-list [data-course="pro"]');
+  await waitPlay(page);
+  let tried = false;
+  for (let guard = 0; guard < 400 && !tried; guard++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    const m = s.run.next;
+    if (m && m.type && m.type.length > 4 && m.prompt && s.promptValue === '') {
+      tried = true;
+      const i = s.run.i, m0 = (await st(page, true)).run.misses, half = m.type.slice(0, m.type.length - 3);
+      await page.keyboard.type(half);
+      const n = (await st(page)).run.next;
+      ok(/^続けて/.test(n.text) && !/Ctrl\+u/.test(n.text) && n.type === m.type.slice(half.length), L + ' half typed (' + half + '): the guide goes on (' + n.text + ')');
+      await page.keyboard.type(n.type); await page.keyboard.press('Enter');
+      await page.waitForFunction((q) => window.tmuxDa.state().run.i > q, i, { timeout: 3000 }).catch(() => {});
+      const a = await st(page, true);
+      ok(a.run.i > i && a.run.misses === m0, L + ' and the rest solves it with no miss (q ' + i + '→' + a.run.i + ', misses ' + m0 + '→' + a.run.misses + ', ' + a.run.type + ', status ' + (await page.$eval('#status', (e) => e.textContent)).slice(0, 60) + ')');
+      continue;
+    }
+    await followGuide(page, 'Control+b');
+  }
+  ok(tried, L + ' a question typed on the : prompt came up');
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -3205,6 +3239,7 @@ const parts = [
   ['loop11', loop11],
   ['loop14', loop14],
   ['version', version],
+  ['ontrack', ontrack],
   ['belts', belts],
   ['ghost', ghost],
   ['tatsujin', tatsujin],
