@@ -1558,7 +1558,7 @@ async function qa(browser) {
   // Ctrl held: prefix → Ctrl+z says so, no miss.
   m0 = await misses();
   await p('Control+z');
-  ok(/Ctrl を離してから z/.test(await status()) && (await st(page)).run.misses === m0, L + ' prefix → Ctrl+z says to release Ctrl, no miss');
+  ok(/prefix が外れた。もう一度 Ctrl\+b、Ctrl を離して z/.test(await status()) && (await st(page)).run.misses === m0, L + ' prefix → Ctrl+z says the prefix is gone, how to go on, no miss');
   // An unbound key names itself.
   await p('Control+k');
   ok(/Ctrl\+k には割り当てがない/.test(await status()) && (await st(page)).run.misses === m0 + 1, L + ' an unbound key is named in the message and is a miss');
@@ -1764,14 +1764,15 @@ async function loop2(browser) {
 
   await page.click('#course-list [data-course="easy"]');
   await waitPlay(page);
-  // 1: Ctrl+arrow where the guide wants a plain arrow: said, no resize, no miss.
+  // 1: Ctrl+arrow where the guide wants a plain arrow: as in tmux a resize of
+  // a cell (fidelity 3; it used to do nothing), the prefix used up, said, no miss.
   let s = await walkTo((x) => x.run.next && x.run.next.pfx && /^[←→↑↓]$/.test(x.run.next.keys[0]));
   if (s) {
     const before = await rect();
     await page.keyboard.press('Control+b'); await page.keyboard.press('Control+' + ARROW[s.run.next.keys[0]]);
     const now = await st(page);
-    ok(now.run.misses === s.run.misses && now.activePane === s.activePane && (await rect()) === before && /Ctrl を離してから/.test(await status()),
-      L + ' Ctrl held on the arrow: said, the pane neither moves nor resizes, no miss (' + (await status()).slice(0, 50) + ')');
+    ok(now.run.misses === s.run.misses && now.activePane === s.activePane && !now.armed && /prefix が外れた。もう一度 Ctrl\+b、Ctrl を離して/.test(await status()),
+      L + ' Ctrl held on the arrow: the focus stays, the prefix is gone, said how to go on, no miss (' + (await status()).slice(0, 50) + ')');
   } else ok(false, L + ' no arrow step reached');
   // 9: Shift forgotten: prefix → 5 when the guide wants %.
   s = await walkTo((x) => x.run.next && x.run.next.pfx && x.run.next.keys[0] === '%');
@@ -2928,7 +2929,8 @@ async function ghost(browser) {
     ok(Math.min(...gaps) >= 0 && new Set(gaps).size > 2, L + tag + ' the keys come in order at a hand\'s uneven pace');
     ok(r.qlog.every((q) => typeof q.p === 'number' && q.p > 0) && r.qlog.every((q) => typeof q.k === 'number'), L + tag + ' every question has its fewest keys and its count: ' + r.qlog.map((q) => q.k + '/' + q.p).join(' '));
     const par = r.qlog.reduce((a, q) => a + q.p, 0);
-    ok(r.qlog.every((q) => q.k === q.p), L + tag + ' following the guide presses exactly the fewest (' + r.keys + ' = ' + par + ')');
+    // The guide's own count is sd; the fewest (p) also weighs the ways shown beside it (fidelity 3).
+    ok(r.qlog.every((q) => q.k === q.sd && q.p <= q.sd), L + tag + ' following the guide presses exactly its own count, never fewer than the fewest (' + r.keys + ' ≥ ' + par + ')');
     const facts = await page.$eval('#result-body .em-facts', (e) => e.textContent);
     ok(facts.indexOf(T.keys) >= 0 && facts.indexOf(r.keys + ' / ' + T.fewest + ' ' + par) >= 0, L + tag + ' the result says 押したキー N / 最短 M: ' + facts.replace(/\s+/g, ' ').slice(-60));
     ok(await page.$('#result-body [data-replay]') !== null, L + tag + ' and offers この回を見る');
@@ -3075,7 +3077,9 @@ async function tatsujin(browser) {
     const want = await types(page);
     ok(want.every((t) => pro.seen.has(t)) && want.length >= 12, L + tag + ' every 達人 type came up (' + pro.seen.size + '/' + want.length + ')');
     ok(r.misses === 0, L + tag + ' following the guide makes no miss (' + r.misses + ')');
-    ok(r.qlog.every((q) => typeof q.p === 'number' && q.k === q.p), L + tag + ' and presses exactly the fewest keys: ' + r.qlog.map((q) => q.t + ' ' + q.k + '/' + q.p).join(', '));
+    ok(r.qlog.every((q) => typeof q.p === 'number' && q.k === q.sd && q.p <= q.sd), L + tag + ' and presses exactly the guide\'s count, the fewest no more: ' + r.qlog.map((q) => q.t + ' ' + q.k + '/' + q.p).join(', '));
+    // A command typed by its full name: the fewest counts tmux's shortest (kill-ses, swapw…).
+    ok(r.qlog.filter((q) => /^(kill_session|swap_window|move_window|new_window_named)$/.test(q.t)).every((q) => q.p < q.sd), L + tag + ' the typed questions\' fewest counts the short names: ' + r.qlog.filter((q) => /^(kill_session|swap_window|move_window|new_window_named)$/.test(q.t)).map((q) => q.t + ' ' + q.p + '<' + q.sd).join(', '));
     ok(pro.figs === pro.layoutQs && pro.layoutQs >= 3, L + tag + ' every layout question shows the layout to make, a box per pane (' + pro.figs + '/' + pro.layoutQs + ')');
     ok(r.qlog.every((q) => q.l === (q.t === 'sync_panes' ? 25 : q.t === 'search_yank' ? 22 : /^layout/.test(q.t) ? 7 : /pane_jump|rotate/.test(q.t) ? 10 : 13)), L + tag + ' each question has its own 目安 from its moves');
     await snap(page, 'result-' + tag, true);
@@ -3154,7 +3158,7 @@ async function tatsujin(browser) {
     r = (await st(page)).result;
     ok(r.misses === 0 && want.every((t) => own.seen.has(t)), L + tag + ' with the expert\'s file every type is solved by the guide, no miss (' + r.misses + ')');
     ok(['J', 'm', 'S'].every((k) => own.keys.has(k)), L + tag + ' and the guide names their J (join), m (move-window) and S (sync): ' + [...own.keys].join(' '));
-    ok(r.qlog.every((q) => typeof q.p === 'number' && q.k === q.p), L + tag + ' in the fewest keys of that file (' + r.keys + ')');
+    ok(r.qlog.every((q) => typeof q.p === 'number' && q.k === q.sd && q.p <= q.sd), L + tag + ' in the guide\'s count of that file, the fewest no more (' + r.keys + ')');
     await page.click('#result-body [data-title]');
     await page.click('#conf-reset');
 
@@ -3499,6 +3503,260 @@ async function resizeHjkl(browser) {
   await ctx.close();
 }
 
+// Fidelity round 3: answers judged by the state reached (targets on the
+// prompt, tmux typed in a pane or outside), names kept as asked, the Ctrl
+// slip told as tmux leaves it, whole-key words in the guide, emacs M-v,
+// options and default keys honoured or said, :bind, the fewest keys, the
+// over-keys list one row a type.
+async function fidelity3(browser) {
+  const L = '[fid3]';
+  const shotsDir = SHOTS ? path.join(SHOTS, 'fid3') : '';
+  const snap = async (page, name) => { if (!shotsDir) return; fs.mkdirSync(shotsDir, { recursive: true }); await page.screenshot({ path: path.join(shotsDir, name + '.png') }); };
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  const status = () => page.$eval('#status', (e) => e.textContent);
+  const term = () => page.$eval('#term', (e) => e.textContent);
+  const cmd = async (line, P = 'Control+b') => { await page.keyboard.press(P); await page.keyboard.press(':'); await page.keyboard.type(line); await page.keyboard.press('Enter'); return st(page, true); };
+  const shell = async (line) => { await page.keyboard.type(line); await page.keyboard.press('Enter'); return st(page, true); };
+  const walkTo = async (pred, P = 'Control+b') => {
+    for (let g = 0; g < 300; g++) {
+      const s = await st(page);
+      if (!s.run || s.run.phase !== 'play') return null;
+      if (pred(s)) return s;
+      await followGuide(page, P);
+    }
+    return null;
+  };
+  const solvedFrom = async (i) => { await page.waitForFunction((q) => { const r = window.tmuxDa.state().run; return !r || r.i > q; }, i, { timeout: 3000 }).catch(() => {}); return st(page); };
+  const finish = async (P = 'Control+b') => { await walkTo(() => false, P); return waitResult(page, L); };
+
+  // ---- 入門: close a pane by :kill-pane -t N and by tmux kill-pane typed in the shell ----
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  // The Ctrl slip: prefix, then Ctrl+key. The prefix is used up (as in tmux) and the message says so.
+  let s = await walkTo((x) => x.run.next && x.run.next.pfx && /^[a-z%"]$/.test(x.run.next.keys[0]) && !/Ctrl/.test(x.run.next.keys[0]));
+  if (s) {
+    const key = s.run.next.keys[0];
+    await page.keyboard.press('Control+b'); await page.keyboard.press('Control+' + (key === '%' ? '5' : key === '"' ? "'" : key));
+    const now = await st(page, true);
+    ok(!now.armed && now.run.misses === s.run.misses && /prefix が外れた。もう一度 Ctrl\+b、Ctrl を離して/.test(await status()), L + ' Ctrl held after the prefix: the prefix is gone and the message says to start again (' + (await status()) + ')');
+  } else ok(false, L + ' no prefixed letter step reached');
+  const closes = [];
+  for (const how of ['prompt', 'shell']) {
+    s = await walkTo((x) => x.run.type === 'close');
+    if (!s) break;
+    const n = (/ペイン (\d+)/.exec(s.run.order) || [])[1];
+    const target = s.panes[Number(n)];
+    if (how === 'prompt') await cmd('kill-pane -t ' + n);
+    else await shell('tmux kill-pane -t ' + n);
+    const now = await solvedFrom(s.run.i);
+    closes.push(how);
+    ok(now.run && now.run.i === s.run.i + 1 && now.run.misses === s.run.misses && !now.panes.includes(target),
+      L + ' close "' + s.run.order + '": ' + (how === 'prompt' ? ':kill-pane -t ' : 'tmux kill-pane -t (in the shell) ') + n + ' solves it, no miss');
+    if (how === 'prompt') {
+      const chips = await page.$eval('#chips', (e) => e.textContent).catch(() => '');
+      ok(/ペインを閉じる: \d+ キーの道もある（Ctrl\+b → /.test(chips), L + ' and the shorter way is said once, briefly: ' + chips);
+      await snap(page, 'shorter-way');
+    }
+  }
+  ok(closes.length === 2, L + ' 入門 asks to close a pane twice (' + closes.length + ')');
+  await finish();
+  // The over-keys list: one row a type (two close questions add up, ×2).
+  const rows = await page.$$eval('#result-body .em-overkeys li', (l) => l.map((e) => e.textContent));
+  const names = rows.map((r) => r.replace(/\s*押した.*$/, '').replace(/ ×\d+$/, ''));
+  ok(rows.length && new Set(names).size === names.length && rows.some((r) => /^ペインを閉じる ×2 /.test(r)), L + ' the over-keys list has one row a type: ' + rows.join(' | '));
+  await snap(page, 'result-overkeys');
+  let r = (await st(page)).result;
+  ok(r.qlog.every((q) => typeof q.p !== 'number' || q.p <= q.sd), L + ' the fewest is never above the guide\'s own count: ' + r.qlog.map((q) => q.p + '/' + q.sd).join(' '));
+  await page.click('#result-body [data-title]');
+
+  // ---- 練習: targets, outside, default keys, :bind, options ----
+  await page.click('#btn-free');
+  await page.waitForFunction(() => window.tmuxDa.state().free);
+  s = await st(page, true);
+  const p0 = s.panes[0];
+  s = await cmd('kill-pane -t 1');
+  ok(s.panes.length === 2 && s.panes[0] === p0, L + ' :kill-pane -t 1 closes pane 1, not the one you are in');
+  s = await cmd('split-window -h -t 0');
+  ok(s.panes.length === 3 && s.panes[0] === p0, L + ' :split-window -t 0 splits pane 0');
+  s = await cmd('swap-pane -s 2 -t 0');
+  ok(s.panes[2] === p0, L + ' :swap-pane -s 2 -t 0 swaps the two');
+  s = await cmd('selectp -t2');
+  ok(s.activePane === s.panes[2], L + ' :selectp -t2 (getopt value glued on) goes to pane 2');
+  s = await cmd('resize-pane -Z -t 1');
+  ok(s.activePane === s.panes[1] && s.windows.find((w) => w.active).zoomed, L + ' :resize-pane -Z -t 1 zooms pane 1');
+  s = await cmd('select-window -t logs');
+  ok(s.activeWindow === 'logs', L + ' :select-window -t logs (a name) goes there');
+  s = await cmd('rename-window -t build bld');
+  ok(s.windows.some((w) => w.name === 'bld') && s.activeWindow === 'logs', L + ' :rename-window -t build bld renames that one');
+  s = await cmd('new -d -s work');
+  s = await cmd('switch-client -t wo');
+  ok(s.session === 'work', L + ' :switch-client -t wo finds work by its start, as tmux does');
+  s = await cmd('kill-session -t dojo; switch-client -t work');
+  ok(!s.sessions.includes('dojo') && s.session === 'work', L + ' two commands joined with ; both run (' + s.sessions.join(',') + ')');
+  await cmd('new -d -s dojo');
+  // prefix E and . and the keys the game does not act out.
+  await page.keyboard.press('Control+b'); await page.keyboard.press('%');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('E');
+  ok(!/割り当てがない/.test(await status()), L + ' prefix E (select-layout -E) is a key of tmux');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('.');
+  s = await st(page, true);
+  ok(s.promptValue === '' && /\(move-window\)/.test(await status()), L + ' prefix . asks (move-window)');
+  await page.keyboard.type('7'); await page.keyboard.press('Enter');
+  ok((await st(page, true)).activeIndex === 7, L + ' and 7 Enter moves the window to 7');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('D');
+  ok(/choose-client: ゲームでは再現していない（ミスにはならない）/.test(await status()), L + ' prefix D: said not acted out (' + (await status()) + ')');
+  // :bind at the prompt works for the session.
+  s = await st(page, true);
+  await cmd('bind m select-pane -t 0');
+  ok(/prefix → m で/.test(await status()), L + ' :bind says what it did: ' + (await status()));
+  await page.keyboard.press('Control+b'); await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('m');
+  s = await st(page, true);
+  ok(s.activePane === s.panes[0], L + ' and prefix m then runs it');
+  // display-panes-time set at the prompt: the numbers stay longer.
+  await cmd('set -g display-panes-time 3000');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('q');
+  await page.waitForTimeout(1500);
+  ok(await page.$$eval('#term .dp-num', (e) => e.length) > 0, L + ' display-panes-time 3000: the numbers are still up after 1.5 s');
+  await page.keyboard.press('Escape');
+  // send-keys -X in copy mode, resize-pane -x.
+  await shell('cat makimono.txt');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('[');
+  s = await cmd('send-keys -X history-top');
+  ok(s.copyAt && s.copyAt.ln === 0, L + ' :send-keys -X history-top goes to the top in copy mode');
+  s = await cmd('send -X cancel');
+  ok(!s.copyMode, L + ' :send -X cancel leaves it');
+  const width = () => page.$eval('#term .pane.active', (e) => Math.round(e.getBoundingClientRect().width));
+  const w0 = await width();
+  await cmd('resize-pane -x 30');
+  const w1 = await width();
+  ok(w1 !== w0 && !/ゲームにない/.test(await status()), L + ' :resize-pane -x 30 sets the width (' + w0 + ' → ' + w1 + ' px)');
+  // Outside: attach takes no word, new -s makes a session and goes in, -t takes a start.
+  await page.keyboard.press('Control+b'); await page.keyboard.press('d');
+  await shell('tmux attach work');
+  ok((await st(page, true)).detached && /too many arguments \(need at most 0\)/.test(await term()), L + ' tmux attach work: an error, as tmux 3.x gives (still outside)');
+  s = await shell('tmux new -s fresh');
+  ok(!s.detached && s.session === 'fresh', L + ' tmux new -s fresh (outside) makes it and goes in');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('d');
+  s = await shell('tmux a -t wor');
+  ok(!s.detached && s.session === 'work', L + ' tmux a -t wor attaches work');
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  s = await st(page, true);
+  ok(s.screen === 'title' && !s.conf, L + ' leaving 練習 drops the :bind keys (defaults again)');
+
+  // ---- emacs copy mode: M-v pages up, C-v down ----
+  await page.click('#conf-box summary');
+  await page.fill('#conf-text', 'setw -g mode-keys emacs\nset -g display-panes-time 2500\nset -sg escape-time 10');
+  await page.click('#conf-apply');
+  const report = await page.$eval('#conf-report', (e) => e.textContent);
+  ok(/ペインの番号を 2.5 秒出す/.test(report) && /Esc の待ち時間/.test(report), L + ' the file report says display-panes-time is used and escape-time does not matter');
+  await page.click('#btn-free');
+  await page.waitForFunction(() => window.tmuxDa.state().free);
+  await shell('cat makimono.txt');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('[');
+  const ln0 = (await st(page, true)).copyAt.ln;
+  await page.keyboard.press('Alt+v');
+  const ln1 = (await st(page, true)).copyAt.ln;
+  await page.keyboard.press('Control+v');
+  const ln2 = (await st(page, true)).copyAt.ln;
+  ok(ln1 < ln0 && ln2 > ln1, L + ' emacs copy mode: M-v pages up, C-v back down (' + ln0 + ' → ' + ln1 + ' → ' + ln2 + ')');
+  ok(!/矩形選択/.test(await status()), L + ' and M-v is not taken for v');
+  await page.keyboard.press('q');
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  await page.evaluate(() => { document.querySelector('#conf-box').open = true; });
+  await page.click('#conf-reset');
+
+  // ---- 中級: last-window by its number (the shorter l said); swap keeps its name ----
+  await page.click('#course-list [data-course="normal"]');
+  await waitPlay(page);
+  // Whatever today's order, each of the three is met once on the way.
+  const done = {};
+  for (let g = 0; g < 300; g++) {
+    s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    const t = s.run.type, i = s.run.i;
+    if (t === 'swap' && !done.swap) {
+      done.swap = true;
+      const label = /ペイン \d+/.exec(s.run.order)[0];
+      let same = true;
+      for (let k = 0; k < 8; k++) {
+        const now = await st(page);
+        if (!now.run || now.run.i !== i) break;
+        if (!now.run.order.startsWith(label)) same = false;
+        await followGuide(page, 'Control+b');
+      }
+      ok(same, L + ' swap: the order keeps "' + label + '" while the panes are renumbered');
+      continue;
+    }
+    if (t === 'last_window' && !done.last) {
+      done.last = true;
+      await page.keyboard.press('Control+b'); await page.keyboard.press(String(s.run.goal.index));
+      const now = await solvedFrom(i);
+      const chips = await page.$eval('#chips', (e) => e.textContent).catch(() => '');
+      ok(now.run && now.run.i === i + 1 && /直前のウィンドウ: l なら番号を見なくても 1 キーで戻れる/.test(chips), L + ' last-window by its number solves it and says l: ' + chips);
+      continue;
+    }
+    if (t === 'detach_attach' && !done.detach) {
+      done.detach = true;
+      const m = s.run.misses, home = s.session;
+      await page.keyboard.press('Control+b'); await page.keyboard.press('d');
+      await shell('tmux new -s other');
+      let now = await st(page);
+      ok(now.run.i === i && now.session === 'other' && now.run.misses === m, L + ' detach_attach: tmux new -s other is not "back" (not solved, no miss)');
+      for (let k = 0; k < 6; k++) { const x = await st(page); if (!x.run || x.run.i !== i) break; await followGuide(page, 'Control+b'); }
+      now = await st(page);
+      ok((now.run ? now.run.i === i + 1 : now.screen === 'result') && now.session === home, L + ' and the guide leads back to ' + home);
+      continue;
+    }
+    await followGuide(page, 'Control+b');
+  }
+  ok(done.swap && done.last && done.detach, L + ' 中級 had swap, last_window and detach_attach (' + Object.keys(done).join(',') + ')');
+  await waitResult(page, L + ' 中級');
+  await page.click('#result-body [data-title]');
+
+  // ---- 上級 in English with C-s bound to choose-tree: the guide never glues keys into words ----
+  const en = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce', locale: 'en-US' });
+  const pe = await en.newPage();
+  const eErr = watch(pe);
+  await pe.goto(PAGE);
+  await pe.click('#conf-box summary');
+  await pe.fill('#conf-text', 'bind C-s choose-tree -Zs\nunbind s');
+  await pe.click('#conf-apply');
+  await pe.click('#course-list [data-course="hard"]');
+  await waitPlay(pe);
+  const bad = new Set();
+  let sessionSeen = false, newSeen = false;
+  for (let g = 0; g < 300; g++) {
+    const x = await st(pe);
+    if (!x.run || x.run.phase !== 'play') break;
+    const t = x.run.next ? x.run.next.text : '';
+    if (/[A-Za-z]Ctrl\+|Ctrl\+s[a-z]/.test(t)) bad.add(t);
+    if (x.run.type === 'session_switch') sessionSeen = true;
+    if (x.run.type === 'session_new' && !newSeen && x.run.next && x.run.next.keys[0] === ':') {
+      // From outside: detach, tmux new -s NAME, then back by the guide.
+      newSeen = true;
+      const i = x.run.i, m0 = x.run.misses;
+      await pe.keyboard.press('Control+b'); await pe.keyboard.press('d');
+      await pe.keyboard.type('tmux new-session -s ' + x.run.goal.name); await pe.keyboard.press('Enter');
+      for (let k = 0; k < 8 && (await st(pe)).run.i === i; k++) await followGuide(pe, 'Control+b');
+      const after = await st(pe);
+      ok(after.run.i === i + 1 && after.run.misses === m0 && after.sessions.includes(x.run.goal.name), L + ' session_new: made from outside with tmux new-session -s, then back: solved, no miss');
+      continue;
+    }
+    await followGuide(pe, 'Control+b');
+  }
+  ok(sessionSeen && !bad.size, L + ' (en) with bind C-s choose-tree the guide says "Press Ctrl+s", never a key glued into a word' + (bad.size ? ': ' + [...bad].join(' | ') : ''));
+  ok(newSeen, L + ' session_new came up in 上級');
+  ok(eErr.length === 0, L + ' (en) no page errors' + (eErr.length ? ': ' + eErr.join(' | ') : ''));
+  await en.close();
+
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -3546,6 +3804,7 @@ const parts = [
   ['ghost', ghost],
   ['tatsujin', tatsujin],
   ['exp2', expertRound2],
+  ['fid3', fidelity3],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
