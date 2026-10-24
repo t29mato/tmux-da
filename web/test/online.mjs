@@ -113,6 +113,15 @@ if (SHOTS) await B.page.screenshot({ path: SHOTS + '/online-ghost.png' });
 // of the shuffle): a real run of each course passes the check.
 for (const course of ['easy', 'normal', 'hard', 'pro', 'daily']) {
   const C = await open();
+  if (course === 'easy') {
+    // A fresh device's first 入門 run asks in its own first order, off the ranking.
+    await C.page.click('#course-list [data-course="easy"]');
+    await C.page.waitForFunction(() => window.tmuxDa.state().run && window.tmuxDa.state().run.phase === 'play', null, { timeout: 10000 });
+    const r0 = await C.page.evaluate(() => ({ first: window.tmuxDa.state().run.first, qs: window.tmuxDa.state().run.qs, want: ADV.levels.COURSES[0].firstQs }));
+    ok(r0.first && JSON.stringify(r0.qs) === JSON.stringify(r0.want), 'easy: a first run asks the first order');
+    await C.page.evaluate((r) => ADV.records.add(r), fakeRun(3.0));
+    await C.page.goto(PAGE);
+  }
   if (course === 'daily') await C.page.click('#today [data-daily]');
   else await C.page.click('#course-list [data-course="' + course + '"]');
   await C.page.waitForFunction(() => window.tmuxDa.state().run && window.tmuxDa.state().run.phase === 'play', null, { timeout: 10000 });
@@ -199,6 +208,8 @@ await WX.page.context().close();
 // E: a fresh device races today's #1 (A) and sees its keys.
 const E = await open();
 ok(await E.page.$eval('#ghost-pick [data-ghost="top"]', (b) => b.getAttribute('aria-pressed')) === 'true', 'E: 今日の 1 位 is the ghost by default');
+// Not E's first run: that one asks its own order and races no one.
+await E.page.evaluate((r) => ADV.records.add(r), fakeRun(3.0));
 await E.page.click('#course-list [data-course="easy"]');
 await E.page.waitForFunction(() => { const s = window.tmuxDa.state(); return s.ghost && s.ghost.today && s.run && s.run.phase === 'play'; }, null, { timeout: 10000 });
 let eg = (await state(E.page)).ghost;
@@ -317,7 +328,7 @@ const rp3 = await playByGuide(A.page, 'pro', 'Control+b', [300, 500]);
 ok(rp3.board.state === 'ok' && rp3.misses === 0, 'A: a 達人 run by hand enters the board (' + JSON.stringify(rp3.board) + ')');
 await A.page.click('#result-body [data-title]');
 const lineA = await A.page.$eval('#today .today-daily', (e) => e.textContent);
-ok(/今日の達人: .+ ・ 最短 \d+ キー/.test(lineA), 'A: the title line: ' + lineA.replace(/\s+/g, ' '));
+ok(/今日の達人: .+ ・ 標準 \d+ キー/.test(lineA), 'A: the title line: ' + lineA.replace(/\s+/g, ' '));
 await A.page.click('#today [data-daily]');
 await A.page.waitForFunction(() => { const r = window.tmuxDa.state().run; return r && r.phase === 'play'; }, null, { timeout: 15000 });
 // The guide's move from the state hook: played from memory, no peek.
@@ -339,7 +350,7 @@ const rd = (await state(A.page)).result;
 ok(rd.daily && rd.board.state === 'ok' && !rd.qlog[0].g, 'A: 今日の達人 enters its board, played without the 手順 (' + JSON.stringify(rd.board) + ')');
 await A.page.waitForSelector('#result-body .daily-board tr.is-me', { timeout: 10000 });
 const drow = await A.page.$eval('#result-body .daily-board tr.is-me', (e) => e.textContent);
-ok(drow.indexOf(name) >= 0 && drow.indexOf(rd.keys + ' / 最短 ' + rd.qlog[0].p) >= 0 && !/手順を見た/.test(drow), 'A: the day\'s board under the result: ' + drow);
+ok(drow.indexOf(name) >= 0 && drow.indexOf(rd.keys + ' / 標準 ' + rd.qlog[0].p) >= 0 && !/手順を見た/.test(drow), 'A: the day\'s board under the result: ' + drow);
 const dshare = await A.page.$eval('#result-body .share-text', (e) => e.textContent);
 ok(dshare.indexOf('?watch=' + rd.runId) >= 0 && /今日の達人/.test(dshare), 'A: its share text carries the watch link: ' + dshare.replace(/\n/g, ' / '));
 if (SHOTS) await A.page.screenshot({ path: SHOTS + '/online-daily.png', fullPage: true });

@@ -291,6 +291,19 @@ test('skill: practice runs do not count, and rankMul evens out the houses', () =
   assert.equal(REC.skill().pace, 2.5);
 });
 
+test('skill: per house, so stepping up to a harder house does not lower the Lv on top', () => {
+  const REC = fresh();
+  [30, 30, 30].forEach((t) => REC.add(run(t))); // 入門 2 s a question
+  const easy = REC.skill().lv;
+  const s = REC.add({ course: 'normal', time: 200, raw: 200, misses: 0, n: 20, qs: [] }); // 10 s, ×1.25 → 8 s
+  assert.equal(s.skillFrom, null, 'the first run of a house has no Lv of its own before it');
+  assert.equal(s.skill.course, 'normal');
+  assert.ok(s.skill.lv < easy);
+  assert.equal(REC.skill().lv, easy, 'the top bar keeps the best house');
+  assert.equal(REC.skill().course, 'easy');
+  assert.equal(REC.skill(null, 'easy').runs, 3);
+});
+
 test('add reports the 腕前 before and after', () => {
   const REC = fresh();
   REC.add(run(75));

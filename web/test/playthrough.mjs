@@ -308,7 +308,8 @@ async function course(browser, prefixOpt, id, viewport, scheme, tag, platform = 
   const s = await st(page);
   ok(s.result && s.result.time > 0 && s.result.record, label + ' the result has a time (' + (s.result ? s.result.time.toFixed(1) : '-') + 's) and is a new record');
   ok(/\d+ 問、解き終わった/.test(await page.$eval('#result-body .em-title', (e) => e.textContent)), label + ' the result says the course is done');
-  ok(/お手本 \d+ 秒(より \d+\.\d 秒 速い|まで あと \d+\.\d 秒)/.test(await page.$eval('#result-body .em-verdict', (e) => e.textContent)), label + ' the result says how far from the お手本 time (' + (await page.$eval('#result-body .em-verdict', (e) => e.textContent)) + ')');
+  // A first run says the next belt instead of the お手本 gap (ux3).
+  ok(/^(.+まで あと \d+\.\d 秒|最高の称号。)はじめての挑戦/.test(await page.$eval('#result-body .em-verdict', (e) => e.textContent)) && !(await page.$('#result-body .em-skill')), label + ' the first result says the next belt, no Lv (' + (await page.$eval('#result-body .em-verdict', (e) => e.textContent)) + ')');
   if (id === 'easy') ok(s.result.misses >= 1, label + ' the miss is in the result');
   await shot(page, `result-${tag}`);
   await page.reload();
@@ -582,14 +583,27 @@ async function english(browser) {
   }
   await waitResult(page, L);
   ok((await st(page)).result.misses === 0, L + ' the English guide leads to no wrong key');
-  const share = await page.$eval('#result-body .share-text', (e) => e.textContent);
-  ok(/^tmux Dojo [A-Z][a-z]{2} \d+ · Beginner · [\d.]+s \(par 53s\) · \S+ [一-龠]+\n/.test(share) && (share.match(/[🟩🟨🟥]/gu) || []).length === 15 && /tmux-dojo\/\?lang=en$/.test(share),
-    L + ' the result to share: the day as Oct 23, time against par, the title, a square per question, the link (' + share.replace(/\n/g, ' / ') + ')');
-  const facts = await page.$eval('#result-body .em-facts', (e) => e.textContent);
-  ok(/Elapsed/.test(facts) && /last 1 run:/.test(await page.$eval('#result-body .sk-note', (e) => e.textContent)), L + ' one run is "1 run", not "1 runs"');
+  // The first run's short result, then a second run for the whole one.
   await look();
   await page.click('#result-body [data-title]');
   ok(/^1 run in all$/.test(await page.$eval('#records-sub', (e) => e.textContent.trim())), L + ' the title counts "1 run in all"');
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  for (let guard = 0; guard < 400; guard++) {
+    const s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    await look();
+    await followGuide(page, 'Control+b');
+  }
+  await waitResult(page, L);
+  const share = await page.$eval('#result-body .share-text', (e) => e.textContent);
+  ok(/^tmux Dojo [A-Z][a-z]{2} \d+ · Beginner · [\d.]+s \(model time 53s\) · \S+ [一-龠]+\n/.test(share) && (share.match(/[🟩🟨🟥]/gu) || []).length === 15 && /tmux-dojo\/\?lang=en$/.test(share),
+    L + ' the result to share: the day as Oct 23, time against par, the title, a square per question, the link (' + share.replace(/\n/g, ' / ') + ')');
+  const facts = await page.$eval('#result-body .em-facts', (e) => e.textContent);
+  ok(/Elapsed/.test(facts) && /Beginner, last 2 runs:/.test(await page.$eval('#result-body .sk-note', (e) => e.textContent)), L + ' the Lv says its house and "2 runs"');
+  await look();
+  await page.click('#result-body [data-title]');
+  ok(/^2 runs in all$/.test(await page.$eval('#records-sub', (e) => e.textContent.trim())), L + ' the title counts "2 runs in all"');
   await page.click('#btn-records');
   await look();
   const ranks = await page.$eval('#records-body .rec-ranks', (e) => e.textContent);
@@ -908,6 +922,8 @@ async function noSkip(browser) {
   const errors = watch(page);
   await page.clock.install();
   await page.goto(PAGE);
+  // Not the first run (whose result is short): the 絵巻 below names the slow question.
+  await page.evaluate(() => ADV.records.add({ course: 'easy', prefix: 'C-b', time: 90, raw: 90, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: [] }));
   await page.click('#course-list [data-course="easy"]');
   await page.clock.runFor(3000);
   await waitPlay(page);
@@ -1059,7 +1075,7 @@ async function records(browser) {
   await waitResult(page, L);
   let r = (await st(page)).result;
   ok(r.count === 1 && r.prev === null && r.record === true, L + ' first run: count 1, no previous, a record');
-  ok(/出発点/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' first run says it is the starting point');
+  ok(/はじめての挑戦。これが自己ベスト/.test(await page.$eval('#result-body', (e) => e.textContent)), L + ' first run says it is the first try, and the best so far');
   let db = await page.evaluate(() => window.tmuxDa.records());
   const run = db.runs[0];
   ok(db.schema === 5 && db.runs.length === 1 && run.id && run.at && run.rank && run.course === 'easy' && run.ver === 2, L + ' the run is stored with id, time, rank and ver 2');
@@ -1380,7 +1396,8 @@ async function uxScreens(browser) {
   ok(noCard === 0, L + ' the guide card is on screen at every step (' + noCard + ' without)');
   ok(bad.length === 0, L + ' the card and いまここ never hide a number or the indicator' + (bad.length ? ': ' + [...new Set(bad)].join(' | ') : ''));
   await waitResult(page, L);
-  ok(await page.$$eval('#result-body .em-slow li', (l) => l.length) === 3 && /秒/.test(await page.$eval('#result-body .em-slow', (e) => e.textContent)), L + ' the result lists the three slowest questions');
+  // A first run's result is short (ux3); the slowest three come from the second run (checked there).
+  ok(!(await page.$('#result-body .em-slow')) && !!(await page.$('#result-body .hanko')), L + ' the first 上級 result is short: the belt and the time, no slowest list');
   ok(!(await page.$('#result-body .rod')) && /^\d+ 回目$/.test(await page.$eval('#result-body .em-hd', (e) => e.textContent.trim())), L + ' the result sheet has no rods and a plain run number');
   // Esc twice with nothing open: back to the title; once does nothing.
   await page.click('#result-body [data-title]');
@@ -1762,6 +1779,8 @@ async function loop2(browser) {
     return null;
   };
 
+  // Not the first run (that one is off the ranking, without the name form below).
+  await page.evaluate(() => ADV.records.add({ course: 'easy', prefix: 'C-b', time: 90, raw: 90, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: [] }));
   await page.click('#course-list [data-course="easy"]');
   await waitPlay(page);
   // 1: Ctrl+arrow where the guide wants a plain arrow: said, no resize, no miss.
@@ -1860,6 +1879,8 @@ async function loop3(browser) {
     }
     return null;
   };
+  // A second 中級 run: the first one's result is short, without the 豆知識 checked below.
+  await page.evaluate(() => ADV.records.add({ course: 'normal', prefix: 'C-b', time: 200, raw: 200, misses: 0, overs: 0, guides: 0, keys: 60, n: 20, qs: [] }));
   await page.click('#course-list [data-course="normal"]');
   await waitPlay(page);
   // 1: a wrong key names itself and its job.
@@ -2876,7 +2897,7 @@ async function belts(browser) {
   ok((await t2('#result-body .hanko')).replace(/\s/g, '') === r3.rank && (await p2.$eval('#result-body .hanko', (e) => e.getAttribute('lang'))) === 'ja', L + ' the English seal keeps the kanji');
   ok(new RegExp(' · ' + info.romaji + ' · ' + info.en).test(await t2('#result-body .em-rank')) || new RegExp(info.romaji + ' · ' + info.en).test(await t2('#result-body .em-rank')), L + ' beside it: romaji · meaning (' + (await t2('#result-body .em-rank')) + ')');
   const share2 = await t2('#result-body .share-text');
-  ok(new RegExp('\\(par 53s\\) · ' + info.romaji + ' ' + r3.rank + '\\n').test(share2), L + ' the English share carries romaji and kanji (' + share2.split('\n')[0] + ')');
+  ok(new RegExp('\\(model time 53s\\) · ' + info.romaji + ' ' + r3.rank + '\\n').test(share2), L + ' the English share carries romaji and kanji (' + share2.split('\n')[0] + ')');
   ok(!(await japanese()).length, L + ' no Japanese on the English result outside the seal and the share title' + ((await japanese()).length ? ': ' + (await japanese()).join(' | ') : ''));
   await snap(p2, 'result-en-phone-dark');
   ok(errors2.length === 0, L + ' no page errors in English' + (errors2.length ? ': ' + errors2.join(' | ') : ''));
@@ -2894,7 +2915,7 @@ async function ghost(browser) {
     const ctx = await browser.newContext({ viewport: vp, reducedMotion: 'reduce', colorScheme: scheme, locale, isMobile: vp === PHONE, hasTouch: vp === PHONE });
     const page = await ctx.newPage();
     const errors = watch(page);
-    const T = tag === 'phone' ? { ghost: 'Ghost', keys: 'Keys pressed', fewest: 'fewest', q: 'Question', watch: 'Watch this run', more: 'more keys' } : { ghost: '影', keys: '押したキー', fewest: '最短', q: '問題', watch: 'この回を見る', more: '最短より多く' };
+    const T = tag === 'phone' ? { ghost: 'Ghost', keys: 'Keys pressed', fewest: 'par', q: 'Question', watch: 'Watch this run', more: 'over par' } : { ghost: '影', keys: '押したキー', fewest: '標準', q: '問題', watch: 'この回を見る', more: '標準より多く' };
     await page.goto(PAGE);
     // The 影 to race is picked on the course select and kept.
     ok(await page.$$eval('#ghost-pick [data-ghost]', (b) => b.length) === 3, L + tag + ' three ghosts to pick from on the course select');
@@ -2929,12 +2950,12 @@ async function ghost(browser) {
     ok(r.qlog.every((q) => typeof q.p === 'number' && q.p > 0) && r.qlog.every((q) => typeof q.k === 'number'), L + tag + ' every question has its fewest keys and its count: ' + r.qlog.map((q) => q.k + '/' + q.p).join(' '));
     const par = r.qlog.reduce((a, q) => a + q.p, 0);
     ok(r.qlog.every((q) => q.k === q.p), L + tag + ' following the guide presses exactly the fewest (' + r.keys + ' = ' + par + ')');
-    const facts = await page.$eval('#result-body .em-facts', (e) => e.textContent);
-    ok(facts.indexOf(T.keys) >= 0 && facts.indexOf(r.keys + ' / ' + T.fewest + ' ' + par) >= 0, L + tag + ' the result says 押したキー N / 最短 M: ' + facts.replace(/\s+/g, ' ').slice(-60));
-    ok(await page.$('#result-body [data-replay]') !== null, L + tag + ' and offers この回を見る');
+    // The first result is short (ux3): the replay is in the records' list.
+    ok(!(await page.$('#result-body .em-facts')) && !(await page.$('#result-body [data-replay]')), L + tag + ' the first result is short: no facts, no この回を見る');
     await snap(page, 'result-' + tag, true);
     // The replay: the same keys on the same house, question by question.
-    await page.click('#result-body [data-replay]');
+    await page.click('#result-body [data-records]');
+    await page.click('#records-body a[data-replay]');
     await page.waitForFunction(() => window.tmuxDa.state().replay, null, { timeout: 5000 });
     let s = await st(page);
     ok(s.screen === 'game' && s.replay.playing && s.replay.n === r.keys, L + tag + ' この回を見る opens the house in a replay of ' + s.replay.n + ' keys');
@@ -2964,9 +2985,9 @@ async function ghost(browser) {
     ok(s.run.misses === r.misses, L + tag + ' the same misses as the run');
     await snap(page, 'replay-end-' + tag);
     await page.keyboard.press('Escape');
-    ok((await st(page)).screen === 'result' && !(await st(page)).replay, L + tag + ' Esc closes the replay back to the result');
+    ok((await st(page)).screen === 'records' && !(await st(page)).replay, L + tag + ' Esc closes the replay back to the records');
     // A second run races the first as its ghost: the strip shows its question and keys.
-    await page.click('#result-body [data-title]');
+    await page.goto(PAGE);
     await page.click('#course-list [data-course="easy"]');
     await waitPlay(page);
     await page.waitForTimeout(700);
@@ -2988,7 +3009,11 @@ async function ghost(browser) {
     const extra = r.qlog.filter((q) => q.k > q.p);
     ok(extra.length >= 1 && extra[0].k - extra[0].p >= 2, L + tag + ' the question with the extra keys is over its fewest (' + extra.map((q) => q.t + ' ' + q.k + '/' + q.p).join(', ') + ')');
     const overText = await page.$eval('#result-body .em-overkeys', (e) => e.textContent).catch(() => '');
-    ok(overText.indexOf(T.more) >= 0, L + tag + ' and is listed under 最短より多く押した問題: ' + overText.replace(/\s+/g, ' '));
+    ok(overText.indexOf(T.more) >= 0, L + tag + ' and is listed under 標準より多く押した問題: ' + overText.replace(/\s+/g, ' '));
+    const par2 = r.qlog.reduce((a, q) => a + q.p, 0);
+    const facts = await page.$eval('#result-body .em-facts', (e) => e.textContent);
+    ok(facts.indexOf(T.keys) >= 0 && facts.indexOf(r.keys + ' / ' + T.fewest + ' ' + par2) >= 0, L + tag + ' the result says 押したキー N / 標準 M: ' + facts.replace(/\s+/g, ' ').slice(-60));
+    ok(await page.$('#result-body [data-replay]') !== null && !(await page.$('#result-body .em-parbeat')), L + tag + ' and offers この回を見る; over 標準, no 標準より少ない');
     ok(r.ghost && r.ghost.name === '自分', L + tag + ' the result reckons against the ghost');
     // The replay from the records' list of runs.
     await page.click('#result-body [data-records]');
@@ -3063,7 +3088,7 @@ async function tatsujin(browser) {
     ok(!(await page.$('#course-list [data-course="pro"].locked, #course-list [data-course="pro"][disabled]')), L + tag + ' and it is open to everyone');
     // 今日の達人 in one line, near 今日の問題.
     const line = await page.$eval('#today .today-daily', (e) => e.textContent).catch(() => '');
-    ok(EN ? /Today's Pro: .+ · fewest \d+ keys/.test(line) : /今日の達人: .+ ・ 最短 \d+ キー/.test(line), L + tag + ' the title has 今日の達人 in one line: ' + line.replace(/\s+/g, ' '));
+    ok(EN ? /Today's Pro: .+ · par \d+ keys/.test(line) : /今日の達人: .+ ・ 標準 \d+ キー/.test(line), L + tag + ' the title has 今日の達人 in one line: ' + line.replace(/\s+/g, ' '));
     const lineBox = await page.$eval('#today .today-daily', (e) => { const r = e.getBoundingClientRect(); return { h: r.height, w: r.width, sw: e.scrollWidth }; });
     ok(lineBox.h < 44 && lineBox.sw <= lineBox.w + 1, L + tag + ' on one line, nothing spilling (' + Math.round(lineBox.h) + 'px high)');
     await snap(page, 'title-' + tag, true);
@@ -3080,8 +3105,10 @@ async function tatsujin(browser) {
     ok(r.qlog.every((q) => q.l === (q.t === 'sync_panes' ? 25 : q.t === 'search_yank' ? 22 : /^layout/.test(q.t) ? 7 : /pane_jump|rotate/.test(q.t) ? 10 : 13)), L + tag + ' each question has its own 目安 from its moves');
     await snap(page, 'result-' + tag, true);
 
-    // A replay: its own controls, not やめる nor the 手順 detail.
-    await page.click('#result-body [data-replay]');
+    // A replay: its own controls, not やめる nor the 手順 detail. (A first
+    // run's result is short: the replay is in the records' list.)
+    await page.click('#result-body [data-records]');
+    await page.click('#records-body a[data-replay]');
     await page.waitForFunction(() => window.tmuxDa.state().replay, null, { timeout: 5000 });
     const shown = await page.evaluate(() => ['.game-foot .quit', '.game-foot .detail-toggle', '#keybar'].map((s) => { const e = document.querySelector(s); return !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none'; }));
     ok(shown.every((x) => !x), L + tag + ' a replay hides やめる, the 手順 detail and the key bar (' + shown.join(',') + ')');
@@ -3089,8 +3116,8 @@ async function tatsujin(browser) {
     await page.waitForTimeout(400);
     await snap(page, 'replay-' + tag);
     await page.keyboard.press('Escape');
-    ok((await st(page)).screen === 'result', L + tag + ' Esc closes the replay');
-    await page.click('#result-body [data-title]');
+    ok((await st(page)).screen === 'records', L + tag + ' Esc closes the replay');
+    await page.goto(PAGE + (EN ? '?lang=en' : ''));
     await page.click('#course-list [data-course="easy"]');
     await waitPlay(page);
     const back = await page.evaluate(() => [document.querySelector('.game-foot .quit'), document.querySelector('.game-foot .detail-toggle')].map((e) => getComputedStyle(e).display !== 'none'));
@@ -3125,9 +3152,9 @@ async function tatsujin(browser) {
     const q0 = r.qlog[0];
     ok(r.daily && r.n === 1 && !q0.g && typeof q0.p === 'number' && q0.k === q0.p, L + tag + ' solved without a peek, in the fewest keys (' + q0.k + '/' + q0.p + ')');
     let body = await page.$eval('#result-body', (e) => e.textContent.replace(/\s+/g, ' '));
-    ok(EN ? body.includes('Keys pressed ' + r.keys + ' / fewest ' + q0.p) && /Solved without the steps/.test(body) : body.includes('押したキー ' + r.keys + ' ／ 最短 ' + q0.p) && /手順を見ずに解いた/.test(body), L + tag + ' the result says the keys against the fewest, and no peek');
+    ok(EN ? body.includes('Keys pressed ' + r.keys + ' / par ' + q0.p) && /Solved without the steps/.test(body) : body.includes('押したキー ' + r.keys + ' ／ 標準 ' + q0.p) && /手順を見ずに解いた/.test(body), L + tag + ' the result says the keys against the fewest, and no peek');
     let share = await page.$eval('#result-body .share-text', (e) => e.textContent);
-    ok(EN ? /Today's Pro .+ fewest \d+ \(no steps\)/.test(share) : /今日の達人 .+ 最短 \d+（手順なし）/.test(share), L + tag + ' the share text says so: ' + share.split('\n')[0]);
+    ok(EN ? /Today's Pro .+ par \d+ \(no steps\)/.test(share) : /今日の達人 .+ 標準 \d+（手順なし）/.test(share), L + tag + ' the share text says so: ' + share.split('\n')[0]);
     ok(!/[ぁ-んァ-ヶ一-龠]/.test(body) || !EN, L + tag + ' no Japanese left on the daily result');
     await snap(page, 'daily-result-' + tag, true);
     // Again, waiting for the 手順: the peek is said and shared.
@@ -3499,6 +3526,146 @@ async function resizeHjkl(browser) {
   await ctx.close();
 }
 
+// UX round 3: はじめての回 of 入門 (its own order, off the ranking, the two
+// words on question 1, a short result), the 稽古 before 入門 drawing from
+// 入門 only, 練習's cheat sheet and the list-keys hint, 上級 with its 手順
+// hidden from the second run (the peeks counted), the Lv per house, and
+// 標準 for the fewest keys. Nothing here depends on the day's order.
+async function ux3(browser) {
+  const L = '[ux3]';
+  const ctx = await browser.newContext({ viewport: DESKTOP, colorScheme: 'light', reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  const text = (sel) => page.$eval(sel, (e) => e.textContent).catch(() => '');
+  const easyQs = await page.evaluate(() => ADV.levels.COURSES[0].qs);
+  const firstQs = await page.evaluate(() => ADV.levels.COURSES[0].firstQs);
+  ok(/2 回目からは手順なし（4 秒で出る）/.test(await text('#course-list [data-course="hard"] .wing-blind')) && /2 回目から/.test(await text('#course-list [data-course="pro"] .wing-blind')) && !(await page.$('#course-list [data-course="easy"] .wing-blind')),
+    L + ' the 上級 and 達人 cards say the 手順 hide from the second run: ' + (await text('#course-list [data-course="hard"] .wing-blind')));
+  const drill0 = await page.evaluate(() => window.tmuxDa.drillTypes());
+  ok(drill0.length > 3 && drill0.every((t) => easyQs.includes(t)), L + ' before 入門 is played, the 稽古 draws from 入門 only (' + drill0.join(' ') + ')');
+  await shot(page, 'ux3-title-light');
+
+  // はじめての回.
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  let s = await st(page);
+  ok(s.run.first && s.run.qs.join() === firstQs.join(), L + ' the first 入門 run asks in its own first order');
+  ok(/^split_/.test(s.run.qs[0]) && !s.run.qs.slice(0, 3).includes('close'), L + ' question 1 is a split, and nothing is closed in the first three (' + s.run.qs.slice(0, 3).join(' ') + ')');
+  ok((await text('#term .motd .ob-words')) === 'ペイン = 画面の区画、ウィンドウ = タブ', L + ' question 1\'s card says ペイン = 画面の区画、ウィンドウ = タブ');
+  ok(/はじめての回（ランキングには載らない）/.test(await text('#playbar')), L + ' the bar says the first run is not ranked: ' + (await text('#playbar')));
+  ok(!s.ghost, L + ' no ghost on the first run');
+  await shot(page, 'ux3-first-q1-light');
+  await playCourse(page, 'Control+b', 'C-b', L, 'guide');
+  await waitResult(page, L);
+  s = await st(page);
+  const body1 = await text('#result-body');
+  ok(s.result.count === 1 && s.result.first && s.result.board && s.result.board.state === 'first', L + ' the first run is kept off the ranking (' + JSON.stringify(s.result.board) + ')');
+  ok(/はじめての回は/.test(body1) && /(まで あと \d+\.\d 秒|最高の称号)/.test(await text('#result-body .em-verdict')) && !/お手本/.test(await text('#result-body .em-verdict')),
+    L + ' the first result gives the next belt, not the お手本 gap: ' + (await text('#result-body .em-verdict')));
+  ok(!(await page.$('#result-body .em-skill')) && !(await page.$('#result-body .em-facts')) && !(await page.$('#result-body .share')) && !!(await page.$('#result-body .hanko')),
+    L + ' the first result shows the belt and the time, no Lv, no facts, no share text');
+  ok((await page.evaluate(() => window.tmuxDa.records().runs.filter((r) => r.course === 'easy')[0].first)) === 1, L + ' the run is kept, marked first');
+  await shot(page, 'ux3-first-result-light');
+  const drill1 = await page.evaluate(() => window.tmuxDa.drillTypes());
+  ok(drill1.includes('resize') && !drill1.includes('join_pane'), L + ' after 入門, the 稽古 draws from 中級 and 上級 too, not yet 達人');
+
+  // The second 入門 run: today's order, no words, the full result.
+  await page.click('#result-body .cta [data-course="easy"]');
+  await waitPlay(page);
+  s = await st(page);
+  ok(!s.run.first && !(await page.$('#term .motd .ob-words')) && !/はじめての回/.test(await text('#playbar')), L + ' the second run is an ordinary one');
+  await playCourse(page, 'Control+b', 'C-b', L + ' 2nd', 'guide');
+  await waitResult(page, L);
+  s = await st(page);
+  const body2 = await text('#result-body');
+  ok(/お手本/.test(await text('#result-body .em-verdict')) && !!(await page.$('#result-body .em-skill')) && !!(await page.$('#result-body .em-facts')), L + ' from the second run the result has the お手本 gap, the Lv and the facts');
+  ok(/入門の直近 2 回/.test(await text('#result-body .em-skill')), L + ' the Lv is the house\'s own: ' + (await text('#result-body .sk-note')));
+  const par2 = s.result.qlog.every((q) => typeof q.p === 'number') ? s.result.qlog.reduce((a, q) => a + q.p, 0) : null;
+  ok(!/最短/.test(body2) && (par2 == null || body2.includes(s.result.keys + ' / 標準 ' + par2)), L + ' the keys read 押したキー N / 標準 M, no 最短');
+  ok(!!(await page.$('#result-body .em-parbeat')) === (par2 != null && s.result.keys < par2), L + ' 標準より N キー少ない shows only when the keys beat 標準');
+  ok(await page.$$eval('#result-body .em-slow li', (l) => l.length) === 3 && !!(await page.$('#result-body .share-text')), L + ' the second result lists the three slowest questions and the share text');
+  await page.click('#result-body [data-title]');
+  await page.waitForFunction(() => window.tmuxDa.state().screen === 'title');
+
+  // 練習: the cheat sheet, and a Japanese line over list-keys.
+  await page.click('#btn-free');
+  await page.waitForFunction(() => window.tmuxDa.state().free);
+  ok(await page.$eval('#cheat', (e) => !e.hidden && e.open), L + ' 練習 shows the keys learnt, open');
+  const cheat = await text('#cheat');
+  ok(/覚えたキー（入門）/.test(cheat) && /左右に分割/.test(cheat) && /ウィンドウを作る/.test(cheat) && !/セッションを作る/.test(cheat), L + ' the cheat sheet has 入門\'s keys in plain words, not the houses not played');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('?');
+  ok(/日本語は下の「覚えたキー」/.test(await text('#term .view-hint')) && (await st(page)).view, L + ' prefix ? lists the keys with a Japanese line above: ' + (await text('#term .view-hint')));
+  await shot(page, 'ux3-practice-light');
+  await page.keyboard.press('q');
+  await page.click('#cheat summary');
+  const sunk = await page.waitForFunction(() => document.activeElement && document.activeElement.id === 'sink', null, { timeout: 2000 }).then(() => true, () => false);
+  ok(await page.$eval('#cheat', (e) => !e.open) && sunk, L + ' the cheat sheet folds, and the keys still go to the house');
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  await page.waitForFunction(() => window.tmuxDa.state().screen === 'title');
+  await page.click('#btn-free');
+  await page.waitForFunction(() => window.tmuxDa.state().free);
+  ok(await page.$eval('#cheat', (e) => !e.hidden && !e.open), L + ' folded stays folded next time');
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  await page.waitForFunction(() => window.tmuxDa.state().screen === 'title');
+
+  // 上級 after one run: the 手順 hidden, the peeks counted.
+  await page.evaluate(() => ADV.records.add({ course: 'hard', prefix: 'C-b', time: 120, raw: 120, misses: 0, overs: 0, guides: 0, keys: 60, n: 16, qs: [] }));
+  await page.reload();
+  ok(/^手順なし（4 秒で出る）$/.test(await text('#course-list [data-course="hard"] .wing-blind')), L + ' after a run the 上級 card says 手順なし（4 秒で出る）');
+  await page.click('#course-list [data-course="hard"]');
+  await waitPlay(page);
+  s = await st(page);
+  ok(s.run.blind && s.run.folded && !(await page.$('#term .motd kbd.next')) && /手順なし（4 秒で出る）/.test(await text('#playbar')), L + ' the second 上級 run starts with the 手順 hidden, and the bar says so');
+  await shot(page, 'ux3-hard-blind-light');
+  await page.waitForTimeout(4500);
+  s = await st(page);
+  ok(s.run.peek && !s.run.folded && s.run.guides === 1, L + ' after 4 s the 手順 come out, and the peek is kept');
+  for (let guard = 0; guard < 40; guard++) {
+    s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    const i = s.run.i;
+    await solve(page, 'Control+b', 'C-b');
+    try { await page.waitForFunction((i) => { const r = window.tmuxDa.state().run; return !r || r.i !== i; }, i, { timeout: 10000 }); } catch (e) { ok(false, L + ' 上級 question ' + (i + 1) + ' (' + s.run.type + ') not solved'); break; }
+  }
+  await waitResult(page, L);
+  s = await st(page);
+  ok(s.result.blind && s.result.guides >= 1 && /手順を見た\s*\d+ 問/.test(await text('#result-body .em-facts')), L + ' the result says on how many questions the 手順 came out: ' + s.result.guides);
+  ok(/上級の直近 2 回/.test(await text('#result-body .em-skill')), L + ' the 上級 result shows 上級\'s own Lv');
+  await shot(page, 'ux3-hard-result-light');
+  // The top bar keeps the house that stands highest: going up a house does not lower it.
+  const lv = await page.evaluate(() => { const R = ADV.records; return [R.skill(null, 'easy'), R.skill(null, 'hard'), R.skill()].map((x) => x && x.lv); });
+  ok(lv[2] === Math.max(lv[0], lv[1]) && (await text('#title-meta')).includes('Lv.' + lv[2]), L + ' the top bar\'s Lv is the best house\'s (' + lv.join(' / ') + ')');
+  ok(!errors.length, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+
+  // English on a phone, dark: the same screens say nothing in Japanese.
+  const pc = await browser.newContext({ viewport: PHONE, colorScheme: 'dark', locale: 'en-US', reducedMotion: 'reduce', hasTouch: true, isMobile: true });
+  const pe = await pc.newPage();
+  const errs = watch(pe);
+  await pe.goto(PAGE + '?lang=en');
+  await shot(pe, 'ux3-title-en-phone-dark');
+  await pe.click('#course-list [data-course="easy"]');
+  await waitPlay(pe);
+  ok((await pe.$eval('#term .motd .ob-words', (e) => e.textContent).catch(() => '')) === 'Pane = a part of the screen, window = a tab' && /First run \(not ranked\)/.test(await pe.$eval('#playbar', (e) => e.textContent)), L + ' in English the first card and bar say it too');
+  await shot(pe, 'ux3-first-q1-en-phone-dark');
+  await pe.evaluate(() => window.tmuxDa && document.querySelector('.to-title') && 0);
+  await pe.close();
+  const pe2 = await pc.newPage();
+  errs.push(...watch(pe2));
+  await pe2.goto(PAGE + '?lang=en');
+  await pe2.click('#btn-free');
+  await pe2.waitForFunction(() => window.tmuxDa.state().free);
+  ok(/Keys learnt \(Beginner|Keys learnt/.test(await pe2.$eval('#cheat', (e) => e.textContent)), L + ' the cheat sheet in English: ' + (await pe2.$eval('#cheat summary', (e) => e.textContent)));
+  await shot(pe2, 'ux3-practice-en-phone-dark');
+  const sw = await pe2.evaluate(() => document.documentElement.scrollWidth);
+  ok(sw <= PHONE.width, L + ' no sideways scroll on a phone (' + sw + 'px)');
+  const missing = await pe2.evaluate(() => ADV.i18n.missing());
+  ok(!missing.length, L + ' no Japanese without English: ' + missing.join(' | '));
+  ok(!errs.length, L + ' no page errors in English' + (errs.length ? ': ' + errs.join(' | ') : ''));
+  await pc.close();
+}
+
 // ONLY=records,sound runs just those parts (the names below).
 const only = (process.env.ONLY || '').split(',').filter(Boolean);
 const parts = [
@@ -3546,6 +3713,7 @@ const parts = [
   ['ghost', ghost],
   ['tatsujin', tatsujin],
   ['exp2', expertRound2],
+  ['ux3', ux3],
   ['sound', sound]
 ];
 const browser = await chromium.launch();
