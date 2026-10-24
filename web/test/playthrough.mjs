@@ -732,13 +732,14 @@ async function confFidelity(browser) {
   const c = (await st(page)).conf;
   ok(c && c.prefix === 'Ctrl+a' && c.modeKeys === 'vi' && c.statusTop === true, L + ' prefix Ctrl+a, mode-keys vi and status-position top are read (' + JSON.stringify(c) + ')');
   const report = await page.$eval('#conf-report', (e) => e.textContent);
-  ok(/未対応 6 行/.test(report) && /関係ない 2 行/.test(report), L + ' the report tells 6 未対応 lines from 2 that do not matter (' + (report.match(/(未対応|関係ない) \d+ 行/g) || []).join(', ') + ')');
+  // renumber-windows and break-pane -d are followed since expert round 2.
+  ok(/未対応 4 行/.test(report) && /関係ない 2 行/.test(report), L + ' the report tells 4 未対応 lines from 2 that do not matter (' + (report.match(/(未対応|関係ない) \d+ 行/g) || []).join(', ') + ')');
   const mk = await page.$$eval('#conf-report > ul li', (e) => e.map((x) => x.textContent).find((t) => /mode-keys/.test(t)) || '');
   ok(/vi 式/.test(mk) && !/見た目/.test(mk), L + ' mode-keys is a used line (vi keys), no longer 見た目の設定 (' + mk.trim() + ')');
   const unsup = await page.$$eval('#conf-report details[open] li code', (e) => e.map((x) => x.textContent.replace(/^\d+/, '').trim()));
   // select-layout and synchronize-panes came with the 達人 house: used now.
-  ok(!unsup.some((l) => /select-layout tiled|synchronize-panes/.test(l)) && unsup.some((l) => /break-pane -d/.test(l)) && unsup.some((l) => /tmux-resurrect/.test(l)) && !unsup.some((l) => /mouse on/.test(l)),
-    L + ' break-pane -d and the plugin are 未対応; = tiled, S sync and mouse on are not (' + unsup.join(' | ') + ')');
+  ok(!unsup.some((l) => /select-layout tiled|synchronize-panes|break-pane -d|renumber-windows/.test(l)) && unsup.some((l) => /tmux-resurrect/.test(l)) && !unsup.some((l) => /mouse on/.test(l)),
+    L + ' the plugin is 未対応; = tiled, S sync, break-pane -d, renumber-windows and mouse on are not (' + unsup.join(' | ') + ')');
   await page.click('#course-list [data-course="hard"]');
   await waitPlay(page);
   ok(await page.evaluate(() => document.body.dataset.status === 'top' && document.querySelector('#status').getBoundingClientRect().bottom <= document.querySelector('#term').getBoundingClientRect().top),
@@ -792,7 +793,8 @@ async function confFidelity(browser) {
   ok(copyQ >= 3 && yankQ, L + ' the run had its copy questions (' + copyQ + ', yank_paste among them)');
   // From m0: the probes above (prefix c on a question that is not about windows) may cost one, by the day's order.
   ok(r.misses === m0, L + ' the guide in these keys makes no miss (' + (r.misses - m0) + ')');
-  ok(seenKeys.has('v') && seenKeys.has('y') && !seenKeys.has('Space') && !seenKeys.has('Enter'), L + ' the copy guide says v and y, never Space or Enter (' + [...seenKeys].join(' ') + ')');
+  // A whole line goes by V (select-line, the fewest keys) since expert round 2.
+  ok((seenKeys.has('v') || seenKeys.has('V')) && seenKeys.has('y') && !seenKeys.has('Space') && !seenKeys.has('Enter'), L + ' the copy guide says v or V and y, never Space or Enter (' + [...seenKeys].join(' ') + ')');
   ok(![...seenKeys].some((k) => /emacs/.test(k)), L + ' with mode-keys vi the emacs keys are not mentioned');
   // By hand: v, End, y copies and leaves copy mode; Escape leaves too.
   await page.click('#result-body [data-title]');
@@ -861,7 +863,7 @@ async function confFidelity(browser) {
     await followGuide(pageEn, P);
   }
   await waitResult(pageEn, L + ' (en)');
-  ok((await st(pageEn)).result.misses === 0 && enKeys.has('v') && enKeys.has('y'), L + ' (en) the guide in these keys makes no miss and says v and y');
+  ok((await st(pageEn)).result.misses === 0 && (enKeys.has('v') || enKeys.has('V')) && enKeys.has('y'), L + ' (en) the guide in these keys makes no miss and says v or V and y');
   ok(!left.size, L + ' (en) no Japanese on screen' + (left.size ? ': ' + [...left].join(' | ') : ''));
   ok(!missing.size, L + ' (en) every text has its English' + (missing.size ? ': ' + [...missing].join(' | ') : ''));
   ok(errorsEn.length === 0, L + ' (en) no page errors' + (errorsEn.length ? ': ' + errorsEn.join(' | ') : ''));
@@ -1831,7 +1833,8 @@ async function loop2(browser) {
     }
     const done = await st(page);
     ok(done.run.i > at && done.run.misses === s.run.misses, L + ' the guide copies the line and pastes it: ' + keys.join(', '));
-    ok(keys.join(',') === 'prefix [,↑,Home,Space,End,Enter,prefix ]', L + ' in the seven moves of the 目安');
+    // V takes the line whole (the fewest keys, expert round 2); Home, Space, End stays beside it.
+    ok(keys.join(',') === 'prefix [,↑,V,Enter,prefix ]', L + ' in five moves, V for the whole line: ' + keys.join(','));
     ok(/デタッチしても/.test(done.input), L + ' the pasted line is in the prompt');
   } else ok(false, L + ' no yank_paste reached');
   await page.click('.quit.to-title');
@@ -3198,6 +3201,275 @@ async function ontrack(browser) {
   await ctx.close();
 }
 
+// --- expert round 2 ---
+// A tmux user's second look: shortened command names, 練習 (no questions),
+// harmless commands that cost nothing, the vi copy-mode moves, send-keys,
+// choose-tree x, renumber-windows, break-pane -d, the fewest keys with V,
+// and older key logs still replayed. Nothing here hangs on the day's order:
+// a question type is reached by the guide, every one of them is in its course.
+async function expertRound2(browser) {
+  const L = '[exp2]';
+  const shotsDir = SHOTS ? path.join(SHOTS, 'exp2') : '';
+  const snap = async (page, name) => { if (!shotsDir) return; fs.mkdirSync(shotsDir, { recursive: true }); await page.screenshot({ path: path.join(shotsDir, name + '.png') }); };
+  const ctx = await browser.newContext({ viewport: DESKTOP, reducedMotion: 'reduce' });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(PAGE);
+  const status = () => page.$eval('#status', (e) => e.textContent);
+  const cmd = async (line, P = 'Control+b') => { await page.keyboard.press(P); await page.keyboard.press(':'); await page.keyboard.type(line); await page.keyboard.press('Enter'); return st(page, true); };
+
+  // 練習: from the title, a house with no question, no clock, no record.
+  const runs0 = (await page.evaluate(() => window.tmuxDa.records())).runs || [];
+  ok(await page.$eval('#btn-free', (e) => /練習/.test(e.textContent)), L + ' the title offers 練習');
+  await page.keyboard.press('p');
+  let s = await st(page, true);
+  ok(s.screen === 'game' && s.free && !s.run, L + ' P opens 練習: the house, no question (' + s.screen + ')');
+  ok(/練習/.test(await page.$eval('#playbar', (e) => e.textContent)) && /Esc/.test(await page.$eval('#playbar', (e) => e.textContent)), L + ' the bar says 練習 and how to leave');
+  await snap(page, 'free');
+  const n0 = s.panes.length;
+  await page.keyboard.press('Control+b'); await page.keyboard.press('%');
+  ok((await st(page, true)).panes.length === n0 + 1, L + ' 練習: prefix % splits');
+  // Shortened names, as tmux takes them.
+  s = await cmd('new -d -s foo');
+  ok(s.sessions.includes('foo'), L + ' :new -d -s foo makes a session');
+  s = await cmd('kill-ses -t foo');
+  ok(!s.sessions.includes('foo'), L + ' :kill-ses -t foo closes it (' + s.sessions.join(',') + ')');
+  await cmd('kill');
+  ok(/ambiguous command: kill, could be: kill-pane, kill-server, kill-session, kill-window/.test(await status()), L + ' :kill is ambiguous, in tmux\'s words');
+  s = await cmd('selectl tiled');
+  ok(s.layout === 'tiled', L + ' :selectl tiled');
+  // display-message with formats, show-messages, list-keys: views, q leaves.
+  await cmd('display "#S:#I.#P #{window_name}"');
+  ok((await status()).includes(s.session + ':' + s.activeIndex + '.'), L + ' display-message expands #S #I #P: ' + (await status()));
+  s = await cmd('list-keys');
+  ok(s.view && s.view.lines.some((l) => /bind-key +-T prefix +% +split-window -h|bind-key +-T prefix +\\% +split-window -h/.test(l)), L + ' list-keys lists the keys in a view (' + (s.view ? s.view.lines.length : 0) + ' lines)');
+  await snap(page, 'list-keys');
+  await page.keyboard.press('j');
+  ok((await st(page, true)).view.top === 1, L + ' j scrolls the view');
+  await page.keyboard.press('q');
+  ok(!(await st(page, true)).view, L + ' q leaves it');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('~');
+  s = await st(page, true);
+  ok(s.view && s.view.lines.some((l) => /ambiguous command/.test(l)), L + ' prefix ~ shows the messages so far');
+  await page.keyboard.press('Escape');
+  // send-keys into another pane.
+  s = await st(page, true);
+  await cmd("send-keys -t 0 'echo sent' Enter");
+  const body0 = await page.$eval('#term .pane[data-pane-id="' + s.panes[0] + '"] .pane-body', (e) => e.textContent);
+  ok(/echo sent/.test(body0) && /sent/.test(body0), L + ' send-keys -t 0 types into pane 0 and runs it');
+  // choose-tree: j moves, x asks, y kills, the tree stays.
+  await cmd('new -d -s zzz');
+  await page.keyboard.press('Control+b'); await page.keyboard.press('s');
+  s = await st(page, true);
+  const want = s.sessions.indexOf('zzz');
+  for (let i = s.picker; i !== want; i = (i + 1) % s.sessions.length) await page.keyboard.press('j');
+  ok((await st(page, true)).picker === want, L + ' choose-tree: j goes down to zzz');
+  await page.keyboard.press('x');
+  ok((await st(page, true)).confirm === 'Kill session zzz? ', L + ' x asks "Kill session zzz? " as tmux does');
+  await snap(page, 'choose-tree-x');
+  await page.keyboard.press('y');
+  s = await st(page, true);
+  ok(!s.sessions.includes('zzz') && s.picker !== null, L + ' y kills it and the tree stays open (' + s.sessions.join(',') + ')');
+  await page.keyboard.press('Escape');
+  // break-pane -d keeps the focus.
+  s = await st(page, true);
+  const w0 = s.activeIndex, nw = s.windows.length, np = s.panes.length;
+  s = await cmd('break-pane -d');
+  ok(s.windows.length === nw + 1 && s.activeIndex === w0 && s.panes.length === np - 1, L + ' break-pane -d: a new window, the focus stays in window ' + w0);
+  ok(!/未対応|ゲームにない/.test(await status()), L + ' and it is not called 未対応');
+  // Esc twice leaves; nothing recorded.
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  ok((await st(page, true)).screen === 'title', L + ' Esc twice leaves 練習');
+  ok(((await page.evaluate(() => window.tmuxDa.records())).runs || []).length === runs0.length, L + ' 練習 leaves no record');
+
+  // Harmless commands in a run cost nothing; a real mistake still does.
+  await page.click('#course-list [data-course="easy"]');
+  await waitPlay(page);
+  s = await st(page);
+  const i0 = s.run.i, m0 = s.run.misses;
+  for (const c of ['display-message hi', 'show-options -g', 'source-file ~/.tmux.conf', 'kill-server', 'lsk', 'showmsgs', 'set -g mouse on']) {
+    await cmd(c);
+    if ((await st(page, true)).view) await page.keyboard.press('q');
+  }
+  await page.keyboard.press('Control+b'); await page.keyboard.press('~'); await page.keyboard.press('q');
+  s = await st(page, true);
+  ok(s.run.i === i0 && s.run.misses === m0, L + ' display-message, show-options, source-file, kill-server, lsk, showmsgs, set, prefix ~: no miss (' + m0 + ' → ' + s.run.misses + ')');
+  await cmd('frobnicate');
+  ok((await st(page, true)).run.misses === m0 + 1, L + ' an unknown command is still a miss');
+  await cmd('sel');
+  ok((await st(page, true)).run.misses === m0 + 2, L + ' an ambiguous one too');
+  await page.click('.quit.to-title');
+
+  // The vi moves, in the expert's file (prefix C-a, bind Enter copy-mode).
+  await page.click('#conf-box summary');
+  await page.fill('#conf-text', EXPERT_CONF);
+  await page.click('#conf-apply');
+  await page.click('#btn-free');
+  const P = 'Control+a';
+  const line = 'echo foo-bar baz.qux  hello_world';
+  await page.keyboard.type(line); await page.keyboard.press('Enter');
+  await page.keyboard.press(P); await page.keyboard.press('Enter');
+  const col = async () => (await st(page, true)).copyAt;
+  await page.keyboard.press('k'); await page.keyboard.press('k');
+  const ln = (await col()).ln;
+  const cols = [];
+  for (const k of ['0', 'w', 'w', 'w', 'w', 'e', 'e', 'b', 'b', 'W', 'E', 'B', '$', '^']) { await page.keyboard.press(k); cols.push(k + (await col()).col); }
+  // "~ $ echo foo-bar baz.qux  hello_world": the columns real tmux 3.8 gives (word-separators as tmux's default).
+  ok(cols.join(' ') === '00 w2 w4 w9 w12 e15 e19 b17 b13 W17 E23 B17 $36 ^0', L + ' w e b W E B $ ^ land where tmux puts them: ' + cols.join(' '));
+  await page.keyboard.press('f'); await page.keyboard.press('a');
+  const fa = (await col()).col;
+  await page.keyboard.press(';'); const semi = (await col()).col;
+  await page.keyboard.press(','); const comma = (await col()).col;
+  await page.keyboard.press('t'); await page.keyboard.press('z'); const tz = (await col()).col;
+  ok([fa, semi, comma, tz].join(',') === '14,18,14,18' && (await col()).ln === ln, L + ' f a, ;, , and t z on the line: ' + [fa, semi, comma, tz].join(','));
+  await page.keyboard.press('g');
+  let c = await col();
+  ok(c.ln === 0 && c.col === 0, L + ' g: the first line, its start');
+  await page.keyboard.press('G');
+  c = await col();
+  ok(c.ln === c.lines && c.col === 3, L + ' G: the last line (the prompt), on its last character (' + JSON.stringify(c) + ')');
+  for (const k of ['H', 'M', 'L']) { await page.keyboard.press(k); cols.length = 0; }
+  ok((await col()).ln === c.lines, L + ' L: the bottom line of the screen');
+  // From the prompt, k is echo's output line.
+  await page.keyboard.press('k'); await page.keyboard.press('V'); await page.keyboard.press('y');
+  ok((await st(page, true)).clipboard === 'foo-bar baz.qux hello_world', L + ' V y copies the whole line: ' + JSON.stringify((await st(page, true)).clipboard));
+  // renumber-windows on (in the file): a window closed closes the gap.
+  s = await st(page, true);
+  await page.keyboard.press(P); await page.keyboard.press('c');
+  await page.keyboard.press(P); await page.keyboard.press('c');
+  await page.keyboard.press(P); await page.keyboard.press(String(s.windows[0].index + 1));
+  await cmd('killw', P);
+  s = await st(page, true);
+  const idx = s.windows.map((w) => w.index);
+  ok(idx.every((x, i) => x === 1 + i), L + ' renumber-windows on: after kill-window the numbers run 1, 2, 3… (' + idx.join(',') + ')');
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+
+  // The fewest keys: the guide takes the line whole with V, and the count agrees.
+  await page.click('#course-list [data-course="pro"]');
+  await waitPlay(page);
+  let found = false;
+  for (let guard = 0; guard < 300; guard++) {
+    s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    if (s.run.type === 'search_yank') {
+      found = true;
+      const par = s.run.par, i = s.run.i;
+      // By hand, the short way a tmux user takes: [ ? word Enter V y (prefix and own keys).
+      await page.keyboard.press(P); await page.keyboard.press('Enter');
+      await page.keyboard.press('?'); await page.keyboard.type(s.run.goal); await page.keyboard.press('Enter');
+      const nx = (await st(page)).run.next;
+      ok(nx && nx.keys[0] === 'V', L + ' search_yank: on the line, the guide says V (' + (nx && nx.text) + ')');
+      await page.keyboard.press('V'); await page.keyboard.press('y');
+      // The last question of the day, maybe: then the result is up.
+      await page.waitForFunction((q) => { const r = window.tmuxDa.state().run; return !r || r.i > q; }, i, { timeout: 3000 }).catch(() => {});
+      const after = await st(page);
+      const hand = 2 + 1 + s.run.goal.length + 1 + 2;
+      ok((after.run ? after.run.i > i : after.screen === 'result') && par <= hand, L + ' search_yank: 最短 ' + par + ' is no more than the hand-found ' + hand);
+      break;
+    }
+    await followGuide(page, P);
+  }
+  ok(found, L + ' search_yank came up in 達人');
+  if ((await st(page)).screen === 'result') await page.click('#result-body [data-title]');
+  else await page.click('.quit.to-title');
+
+  // send-keys -t into each pane answers the synchronize-panes question once
+  // every pane has the command; before that it just types, no miss.
+  await page.evaluate(() => { document.querySelector('#conf-box').open = true; });
+  await page.click('#conf-reset');
+  await page.click('#course-list [data-course="pro"]');
+  await waitPlay(page);
+  found = false;
+  for (let guard = 0; guard < 300; guard++) {
+    s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    if (s.run.type === 'sync_panes') {
+      found = true;
+      const i = s.run.i, m = s.run.misses, n = s.panes.length;
+      for (let k = 0; k < n; k++) {
+        await cmd("send-keys -t " + k + " '" + s.run.goal.cmd + "' Enter");
+        const now = await st(page);
+        if (k < n - 1) ok(now.run && now.run.i === i && now.run.misses === m, L + ' sync_panes: send-keys -t ' + k + ' types there, not solved yet, no miss');
+      }
+      await page.waitForFunction((q) => { const r = window.tmuxDa.state().run; return !r || r.i > q; }, i, { timeout: 3000 }).catch(() => {});
+      const after = await st(page);
+      ok(after.run ? after.run.i > i && after.run.misses === m : after.screen === 'result', L + ' sync_panes: send-keys into all ' + n + ' panes answers it, no miss');
+      break;
+    }
+    await followGuide(page, 'Control+b');
+  }
+  ok(found, L + ' sync_panes came up in 達人');
+  if ((await st(page)).screen === 'result') await page.click('#result-body [data-title]');
+  else await page.click('.quit.to-title');
+
+  // 上級's two panes to close: once one is gone, the order never names the same number twice.
+  await page.click('#course-list [data-course="hard"]');
+  await waitPlay(page);
+  found = false;
+  for (let guard = 0; guard < 300; guard++) {
+    s = await st(page);
+    if (!s.run || s.run.phase !== 'play') break;
+    if (s.run.type === 'two_akima') {
+      found = true;
+      const i = s.run.i, n = s.panes.length, first = s.run.order;
+      for (let k = 0; k < 8 && (await st(page)).panes.length === n; k++) await followGuide(page, 'Control+b');
+      const mid = (await st(page)).run;
+      const labels = (mid.order.match(/ペイン \d+/g) || []);
+      ok(mid.i === i && new Set(labels).size === labels.length && /も閉じる/.test(mid.order), L + ' two_akima: "' + first + '", then "' + mid.order + '"');
+      break;
+    }
+    await followGuide(page, 'Control+b');
+  }
+  ok(found, L + ' two_akima came up in 上級');
+  if ((await st(page)).screen === 'result') await page.click('#result-body [data-title]');
+  else await page.click('.quit.to-title');
+
+  // Older key logs (no version: the game before this round) still replay to the end.
+  const FIX = JSON.parse(fs.readFileSync(path.resolve(HERE, '..', '..', 'server', 'test', 'fixtures', 'keylogs.json'), 'utf8'));
+  for (const name of Object.keys(FIX)) {
+    const run = JSON.parse(JSON.stringify(FIX[name]));
+    run.id = 'fx-' + name;
+    const ok1 = await page.evaluate((r) => {
+      const all = JSON.parse(localStorage.getItem('tmux-da') || '{}');
+      all.runs = (all.runs || []).concat([r]);
+      localStorage.setItem('tmux-da', JSON.stringify(all));
+      const a = document.createElement('a'); a.dataset.replay = r.id; document.body.appendChild(a); a.click(); a.remove();
+      return !!window.tmuxDa.state().replay;
+    }, run);
+    if (!ok1) { ok(false, L + ' ' + name + ': the old log opens a replay'); continue; }
+    await page.click('#ghostbar [data-rp="speed"]');
+    await page.waitForFunction(() => { const r = window.tmuxDa.state().replay; return r && (r.done || r.lost); }, null, { timeout: 90000 }).catch(() => {});
+    s = await st(page, true);
+    // These logs' copy questions were pressed on a pane of another size (the
+    // game before this round loses them there too): up to the first one.
+    const firstCopy = run.qs.findIndex((q) => /^copy_/.test(q.t));
+    const upTo = firstCopy < 0 ? run.n : firstCopy;
+    ok(s.replay && s.replay.legacy && s.run.i >= upTo && (firstCopy >= 0 || (s.replay.done && !s.replay.lost)), L + ' ' + name + ' (' + run.day + ', no version): replayed by the old rules ' + (firstCopy < 0 ? 'to the end' : 'up to its first copy question') + ' (' + (s.run && s.run.i) + '/' + run.n + ')');
+    await page.keyboard.press('Escape');
+  }
+  ok(errors.length === 0, L + ' no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
+  await ctx.close();
+
+  // In English, on a phone: 練習 and the free commands say nothing in Japanese.
+  const en = await browser.newContext({ viewport: PHONE, reducedMotion: 'reduce', locale: 'en-US', colorScheme: 'dark', isMobile: true, hasTouch: true });
+  const pe = await en.newPage();
+  const eErr = watch(pe);
+  const missing = new Set();
+  pe.on('console', (m) => { if (/\[i18n\]/.test(m.text())) missing.add(m.text()); });
+  await pe.goto(PAGE);
+  await pe.click('#btn-free');
+  const jp = /[\u3040-\u30ff\u4e00-\u9faf]/;
+  const bar = await pe.$eval('#playbar', (e) => e.textContent);
+  ok(/Practice/.test(bar) && !jp.test(bar), L + ' (en) 練習 is Practice: ' + bar);
+  await pe.keyboard.press('Control+b'); await pe.keyboard.press(':'); await pe.keyboard.type('kill-server'); await pe.keyboard.press('Enter');
+  const msg = await pe.$eval('#status', (e) => e.textContent);
+  ok(/not acted out in the game \(not a miss\)/.test(msg) && !jp.test(msg), L + ' (en) a command not acted out says so: ' + msg);
+  if (shotsDir) await pe.screenshot({ path: path.join(shotsDir, 'free-en-phone.png') });
+  ok(missing.size === 0, L + ' (en) every text has its English' + (missing.size ? ': ' + [...missing].join(' | ') : ''));
+  ok(eErr.length === 0, L + ' (en) no page errors' + (eErr.length ? ': ' + eErr.join(' | ') : ''));
+  await en.close();
+}
+
 // The H/J/K/L button: the four resize binds go in, and the resize question
 // of 中級 is guided (and solved) with them, never with the arrows.
 async function resizeHjkl(browser) {
@@ -3273,6 +3545,7 @@ const parts = [
   ['belts', belts],
   ['ghost', ghost],
   ['tatsujin', tatsujin],
+  ['exp2', expertRound2],
   ['sound', sound]
 ];
 const browser = await chromium.launch();

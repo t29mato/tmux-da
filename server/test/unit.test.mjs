@@ -233,3 +233,10 @@ test('checkRun: 今日の達人 takes the day\'s question only, and says whether
   assert.throws(() => checkRun({ ...ok, qs: [{ t: other, s: 4.2, m: 0 }] }), /not today's order/);
   assert.throws(() => checkRun({ ...ok, qs: [ok.qs[0], ok.qs[0]], time: 8.4 }), /bad questions/);
 });
+
+// --- expert round 2 ---
+test('checkLog: the version of the rules a log was pressed on is kept; a bad one is dropped', () => {
+  assert.equal(checkLog(withLog('easy-expert', (r) => { r.klog.v = 2; })).v, 2);
+  assert.equal(checkLog(withLog('easy-expert', (r) => { delete r.klog.v; })).v, undefined);
+  assert.equal(checkLog(withLog('easy-expert', (r) => { r.klog.v = 'x'; })).v, undefined);
+});

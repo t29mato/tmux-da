@@ -280,3 +280,67 @@ test('move-window: to a free number only ("index in use"), -r closes the gaps', 
   T.renumberWindows(s);
   assert.deepEqual(plain(s.windows.map((w) => w.index)), [0, 1, 2]);
 });
+
+// --- expert round 2 ---
+test('renumber-windows on: a window gone closes the gap, from base-index; a move leaves it (tmux 3.8)', () => {
+  const s = T.createSession({ name: 't', baseIndex: 1 });
+  s.renumber = true;
+  const ws = [0, 1, 2, 3].map(() => T.createWindow(s, 'w'));
+  T.selectWindow(s, ws[0].id);
+  assert.deepEqual(plain(s.windows.map((w) => w.index)), [1, 2, 3, 4]);
+  // tmux: move-window -t 9 leaves 1 2 3 9 (no renumbering on a move).
+  assert.ok(T.moveWindow(s, ws[1].id, 9));
+  assert.deepEqual(plain(s.windows.map((w) => w.index)), [1, 3, 4, 9]);
+  // kill-window: 1 2 3, in order.
+  assert.ok(T.killWindow(s, ws[2].id));
+  assert.deepEqual(plain(s.windows.map((w) => w.id)), [ws[0].id, ws[3].id, ws[1].id]);
+  assert.deepEqual(plain(s.windows.map((w) => w.index)), [1, 2, 3]);
+  // join-pane that empties a window closes its gap too.
+  const lone = ws[3].active;
+  assert.ok(T.joinPane(s, ws[3], lone, ws[0], ws[0].active, 'tb', false, false));
+  assert.deepEqual(plain(s.windows.map((w) => w.index)), [1, 2]);
+  // Off (tmux's default): the gap stays.
+  const o = T.createSession({ name: 'o' });
+  const a = T.createWindow(o, 'a'), b = T.createWindow(o, 'b'), c = T.createWindow(o, 'c');
+  T.selectWindow(o, a.id);
+  T.killWindow(o, b.id);
+  assert.deepEqual(plain(o.windows.map((w) => w.index)), [0, 2]);
+  assert.ok(c);
+});
+
+test('break-pane -d: the pane gets a window of its own, the focus stays where it was', () => {
+  const s = T.createSession({ name: 't' });
+  const w = T.createWindow(s, 'main');
+  T.selectWindow(s, w.id);
+  const a = w.active, b = T.splitPane(w, a, 'lr', null, false).id;
+  // tmux: break-pane -d of the active pane → window 1 made, window 0 still current, its other pane active.
+  const fresh = T.breakPane(s, w, b, true);
+  assert.notEqual(fresh, w);
+  assert.equal(s.active, w.id);
+  assert.equal(w.active, a);
+  assert.equal(fresh.index, 1);
+  assert.equal(T.panesOf(fresh)[0].id, b);
+  // Without -d you go with it.
+  const c = T.splitPane(w, a, 'tb', null, false).id;
+  const f2 = T.breakPane(s, w, c);
+  assert.equal(s.active, f2.id);
+});
+
+test('copy mode: vi word moves and f/t as tmux 3.8 puts the cursor (default word-separators)', () => {
+  // Measured on tmux 3.8: send-keys -X next-word… and #{copy_cursor_x}.
+  const line = 'foo-bar baz.qux  hello_world';
+  const walk = (moves, c = 0) => moves.map(([what, big]) => (c = T.copyWord([line], 0, c, what, !!big).c));
+  assert.deepEqual(plain(walk([['w'], ['w'], ['w'], ['w']])), [3, 4, 8, 11], 'w: - and . are words of their own');
+  assert.deepEqual(plain(walk([['e'], ['e']], 11)), [14, 27], 'e: _ is part of a word');
+  assert.deepEqual(plain(walk([['b'], ['b']], 27)), [17, 12]);
+  assert.deepEqual(plain(walk([['w', 1], ['e', 1], ['b', 1]], 12)), [17, 27, 17], 'W E B: split at spaces only');
+  // Across lines: w goes on to the next line's first word, b back.
+  assert.deepEqual(plain(T.copyWord(['ab', '  cd'], 0, 0, 'w')), { j: 1, c: 2 });
+  assert.deepEqual(plain(T.copyWord(['ab', '  cd'], 1, 2, 'b')), { j: 0, c: 0 });
+  // jump-forward a from 0: 5, again 9; jump-to-forward z from 5: 9; jump-backward f from 9: 0.
+  assert.equal(T.copyJump(line, 0, 'f', 'a'), 5);
+  assert.equal(T.copyJump(line, 5, 'f', 'a'), 9);
+  assert.equal(T.copyJump(line, 5, 't', 'z'), 9);
+  assert.equal(T.copyJump(line, 9, 'F', 'f'), 0);
+  assert.equal(T.copyJump(line, 0, 'T', 'o'), 0, 'nothing that way: the cursor stays');
+});

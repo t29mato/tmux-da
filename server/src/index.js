@@ -200,7 +200,7 @@ async function enter(env, hash, run) {
   ).bind(run.id, hash, run.course, VER, c.time, jstDay(now), now.toISOString(), JSON.stringify(c.splits), c.own, c.peek).run();
   if (log) {
     await env.DB.prepare('INSERT OR IGNORE INTO keylogs (key_hash, run_id, log) VALUES (?1, ?2, ?3)')
-      .bind(hash, run.id, JSON.stringify({ keys: log.keys, q: log.q, cut: log.cut || undefined })).run();
+      .bind(hash, run.id, JSON.stringify({ keys: log.keys, q: log.q, cut: log.cut || undefined, v: log.v })).run();
   }
   // Where it stands today among each player's best.
   const day = jstDay(now);
