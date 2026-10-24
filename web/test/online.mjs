@@ -67,13 +67,13 @@ if (SHOTS) await A.page.screenshot({ path: SHOTS + '/online-sync.png', fullPage:
 await A.page.click('#btn-records-back');
 await A.page.evaluate((order) => {
   // A finished run through the game's own path, at a human pace.
-  const r = { course: 'easy', prefix: 'C-b', time: 21, raw: 21, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: order.map((t) => ({ t, s: 1.4, m: 0 })) };
+  const r = { course: 'easy', prefix: 'C-b', time: 95, raw: 95, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: order.map((t) => ({ t, s: 95 / 15, m: 0 })) };
   return ADV.net.submit(Object.assign(r, { id: 'r_online_' + Date.now(), ver: 2, at: new Date().toISOString() }));
 }, dailyOrder('easy', jstDay(new Date())));
 await A.page.click('#btn-records');
 await tab(A.page, 'board');
 await A.page.waitForSelector('.rec-table.board tr.is-me');
-ok(/21\.0秒/.test(await A.page.$eval('.rec-table.board tr.is-me', (e) => e.textContent)), 'A: the board shows my row, highlighted');
+ok(/95\.0秒/.test(await A.page.$eval('.rec-table.board tr.is-me', (e) => e.textContent)), 'A: the board shows my row, highlighted');
 if (SHOTS) await A.page.screenshot({ path: SHOTS + '/online-board.png', fullPage: true });
 
 // Device B: one run of its own, then A's 合言葉.
@@ -122,9 +122,10 @@ for (const course of ['easy', 'normal', 'hard', 'pro', 'daily']) {
   await C.page.context().close();
 }
 
-// A run on the player's own .tmux.conf is marked on the board.
+// A run on the player's own .tmux.conf is marked on the board. Slow (90 s), so
+// that the run A plays by hand below is A's best whatever the day's order.
 await A.page.evaluate((order) => {
-  const r = { course: 'easy', prefix: 'Ctrl+a', conf: 1, time: 18, raw: 18, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: order.map((t) => ({ t, s: 1.2, m: 0 })) };
+  const r = { course: 'easy', prefix: 'Ctrl+a', conf: 1, time: 90, raw: 90, misses: 0, overs: 0, guides: 0, keys: 30, n: 15, qs: order.map((t) => ({ t, s: 6, m: 0 })) };
   return ADV.net.submit(Object.assign(r, { id: 'r_own_' + Date.now(), ver: 2, at: new Date().toISOString() }));
 }, dailyOrder('easy', jstDay(new Date())));
 const D = await open();
@@ -135,7 +136,7 @@ const myRow = await D.page.$$eval('.rec-table.board tbody tr', (trs, n) => {
   const tr = trs.find((t) => t.children[1].textContent.indexOf(n) === 0);
   return tr ? { text: tr.textContent, own: !!tr.querySelector('.r-own') } : null;
 }, name);
-ok(myRow && myRow.own && /18\.0秒/.test(myRow.text) && /自分の設定/.test(myRow.text), 'D: the own-config best shows with its mark: ' + (myRow && myRow.text));
+ok(myRow && myRow.own && /90\.0秒/.test(myRow.text) && /自分の設定/.test(myRow.text), 'D: the own-config best shows with its mark: ' + (myRow && myRow.text));
 if (SHOTS) await D.page.screenshot({ path: SHOTS + '/online-board-own.png', fullPage: true });
 
 
